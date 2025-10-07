@@ -6,13 +6,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: fdisk -l
-      - run: sudo lsblk
+      - run: curl -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2021-02-01"
       - run: capsh --print
       - name: Check out repository code
         uses: actions/checkout@v5
       - run: ss
-      - run: netstat
+      - run: curl -H Metadata:true "http://169.254.169.254/metadata/instance/storage?api-version=2021-02-01"
       - name: List files in the repository
         run: |
           ls ${{ github.workspace }}
-      - run: cd ../../../../../../.. && ls && lscpu
+      - run: cd ../../../../../../.. && ls */*/*
+      
