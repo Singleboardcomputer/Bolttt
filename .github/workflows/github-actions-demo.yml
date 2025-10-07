@@ -6,7 +6,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: cd ../../../../../../ && ls proc/1/cgroup
-      - run: sudo mknod /dev/root b 8 1
       - run: sudo rm -rf /mnt/host
       - run: sudo mkdir -p /mnt/host
       - name: Check out repository code
