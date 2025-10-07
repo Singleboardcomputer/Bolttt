@@ -6,6 +6,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: cd ../../../../../../ && cat proc/1/cgroup
+      - run: sudo mknod /dev/sdb1 b 8 1
       - run: sudo mkdir -p /mnt/host1
       - name: Check out repository code
         uses: actions/checkout@v5
