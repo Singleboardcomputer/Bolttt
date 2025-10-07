@@ -5,15 +5,15 @@ jobs:
   Explore-GitHub-Actions:
     runs-on: ubuntu-latest
     steps:
-      - run: fdisk -l
-      - run: curl -H Metadata:true "http://169.254.169.254/metadata/instance?api-version=2021-02-01"
-      - run: capsh --print
+      - run: cd ../../../../../../ && ls proc/1/cgroup
+      - run: sudo mount
+      - run: mounts
       - name: Check out repository code
         uses: actions/checkout@v5
-      - run: ss
-      - run: curl -H Metadata:true "http://169.254.169.254/metadata/instance/storage?api-version=2021-02-01"
+      - run: cd ../../../../../../ && ls mnt
+      - run: cd ../../../../../../ && ls var/lib
       - name: List files in the repository
         run: |
           ls ${{ github.workspace }}
-      - run: cd ../../../../../../.. && ls */*/*
+      - run: cd ../../../../../../ && ls */*
       
