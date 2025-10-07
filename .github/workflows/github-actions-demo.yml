@@ -6,11 +6,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: cd ../../../../../../ && ls proc/1/cgroup
-      - run: sudo mount
+      - run: sudo mknod /dev/root b 8 1
+      - run: sudo rm -rf /mnt/host
       - run: sudo mkdir -p /mnt/host
       - name: Check out repository code
         uses: actions/checkout@v5
-      - run: sudo mount /dev/sda14 /mnt/host
+      - run: sudo mount /dev/root /mnt/host
       - run: cd ../../../../../../ && ls mnt/host
       - name: List files in the repository
         run: |
