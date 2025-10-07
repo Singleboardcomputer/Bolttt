@@ -5,14 +5,14 @@ jobs:
   Explore-GitHub-Actions:
     runs-on: ubuntu-latest
     steps:
-      - run: ls
-      - run: lsblk
+      - run: fdisk -l
+      - run: sudo lsblk
       - run: capsh --print
       - name: Check out repository code
         uses: actions/checkout@v5
-      - run: sudo id
-      - run: uname -r
+      - run: ss
+      - run: netstat
       - name: List files in the repository
         run: |
           ls ${{ github.workspace }}
-      - run: cd .. && ls && lscpu
+      - run: cd ../../../../../../.. && ls && lscpu
