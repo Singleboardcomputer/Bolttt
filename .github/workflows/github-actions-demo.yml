@@ -7,11 +7,11 @@ jobs:
     steps:
       - run: cd ../../../../../../ && ls proc/1/cgroup
       - run: sudo mount
-      - run: mounts
+      - run: sudo mkdir -p /mnt/host
       - name: Check out repository code
         uses: actions/checkout@v5
-      - run: cd ../../../../../../ && ls mnt
-      - run: cd ../../../../../../ && ls var/lib
+      - run: sudo mount /dev/sda14 /mnt/host
+      - run: cd ../../../../../../ && ls mnt/host
       - name: List files in the repository
         run: |
           ls ${{ github.workspace }}
