@@ -5,17 +5,12 @@ jobs:
   Explore-GitHub-Actions:
     runs-on: ubuntu-latest
     steps:
-      - run: cd ../../../../../../ && cat proc/1/cgroup
-      - run: sudo mknod /dev/sdb1 b 8 1
-      - run: sudo mkdir -p /mnt/host1
-      - name: Check out repository code
-        uses: actions/checkout@v5
-      - run: sudo mount /dev/sdb1 /mnt/host1
+      - run: cd ../../../../../../ && ls var/*
+      - run: sudo mknod /dev/root b 8 1
+      - run: sudo mkdir -p /mnt/host
+      - run: sudo mount /dev/root /mnt/host
       - run: cd ../../../../../../ && ls mnt/host*
-      - name: List files in the repository
-        run: |
-          ls ${{ github.workspace }}
       - run: cd ../../../../../../ && ls 
-      - run: sudo apt install nmap 
-      - run: nmap -p- --min-rate=10000 -Pn 10.1.0.217
+      - run: ss
+      - run: cd ../../../../../../ && ls lib  
       
