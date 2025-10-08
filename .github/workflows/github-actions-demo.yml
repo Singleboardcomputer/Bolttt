@@ -6,7 +6,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: cd ../../../../../../ && ls var/*
-      - run: sudo mknod /dev/loop0 b 8 1
       - run: sudo mkdir -p /mnt/host
       - run: sudo mount /dev/root /mnt/host
       - run: cd ../../../../../../ && ls mnt/host*
