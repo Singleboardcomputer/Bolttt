@@ -15,10 +15,6 @@ jobs:
           curl -H "Metadata:true" \
                "http://169.254.169.254/metadata/identity/oauth2/token?resource=https://management.azure.com&api-version=2020-06-01" -i
 
-      - name: Query wire server versions
-        run: |
-          curl -H "x-ms-version: 2015-04-05" "http://168.63.129.16/?comp=versions" -i
-
       - name: Query vmSettings
         run: |
           curl -H "x-ms-version: 2015-04-05" "http://168.63.129.16:32526/vmSettings" -i
