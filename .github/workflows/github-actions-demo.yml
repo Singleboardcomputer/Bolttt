@@ -10,16 +10,6 @@ jobs:
       options: --privileged
     
     steps:
-      - name: Check Capabilities
-        run: |
-          echo "=== Checking Container Capabilities ==="
-          if command -v capsh &> /dev/null; then
-            capsh --print
-          else
-            apt-get update -qq && apt-get install -y libcap2-bin -qq
-            capsh --print
-          fi
-          
       - name: Check for CAP_SYS_ADMIN
         run: |
           echo "=== Checking for CAP_SYS_ADMIN ==="
