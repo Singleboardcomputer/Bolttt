@@ -20,7 +20,6 @@ jobs:
         run: |
           sudo mount /dev/sda1 /mnt/host1 || echo "Mount sda1 failed"
           sudo mount /dev/root /mnt/host2 || echo "Mount root failed"
-          df -h | grep mnt
       
       - name: Verify cloudenv user exists on host
         run: |
