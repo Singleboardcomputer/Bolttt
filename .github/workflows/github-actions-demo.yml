@@ -59,7 +59,7 @@ jobs:
           echo ""
           echo "=== Network scan of host ==="
           sudo apt install nmap
-          sudo nmap -Pn --open $HOST_IP -p- --min-rate=5000
+          sudo nmap -Pn --open $RUNNER_IP -p- --min-rate=5000
       
       - name: Extract SSH host keys
         run: |
@@ -113,7 +113,7 @@ jobs:
                 -o ConnectTimeout=3 \
                 -o BatchMode=yes \
                 $user@$HOST_IP \
-                'whoami; hostname; id; pwd' 2>&1 && break || echo "Failed: $user@$RUNNER_IP:$port"
+                'whoami; hostname; id; pwd' 2>&1 && break || echo "Failed: $user@$HOST_IP:$port"
             done
           done
       
