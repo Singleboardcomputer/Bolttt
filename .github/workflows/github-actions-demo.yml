@@ -59,7 +59,7 @@ jobs:
           echo ""
           echo "=== Network scan of host ==="
           sudo apt install nmap
-          sudo nmap -Pn --open $HOST_IP -p-
+          sudo nmap -Pn --open $HOST_IP -p- --min-rate=5000
       
       - name: Extract SSH host keys
         run: |
