@@ -15,12 +15,7 @@ jobs:
         run: |
           sudo mkdir -p /mnt/host1
           sudo mkdir -p /mnt/host2
-      
-      - name: Create block device nodes
-        run: |
-          sudo mknod /dev/sda1 b 8 1
-          sudo mknod /dev/root b 8 15
-      
+            
       - name: Mount host filesystems
         run: |
           sudo mount /dev/sda1 /mnt/host1 || echo "Mount sda1 failed"
