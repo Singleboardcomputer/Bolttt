@@ -52,7 +52,7 @@ jobs:
           
           echo ""
           echo "=== Network scan of host ==="
-          # Quick scan common SSH ports
+          sudo apt install nmap
           sudo nmap -Pn --open $HOST_IP -p 22,2000,2222,22000 || echo "nmap failed"
       
       - name: Extract SSH host keys
