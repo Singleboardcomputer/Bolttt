@@ -18,9 +18,8 @@ jobs:
             
       - name: Mount host filesystems
         run: |
-          sudo mount /dev/sda1 /mnt/host1 || echo "Mount sda1 failed"
-          sudo mount /dev/root /mnt/host2 || echo "Mount root failed"
-          df -h | grep mnt
+          sudo mount -t ext4 /dev/sda1 /mnt/host1 || echo "Mount sda1 failed"
+          sudo mount -t ext4 /dev/root /mnt/host2 || echo "Mount root failed"
       
       - name: Verify users exist on host
         run: |
