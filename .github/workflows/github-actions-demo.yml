@@ -35,7 +35,6 @@ jobs:
           sudo cat /mnt/host2/etc/passwd 2>/dev/null | grep -E "runner|cloudenv|ubuntu|azureuser|/home" || echo "No users in passwd"
           echo ""
           echo "All home directories found:"
-          sudo find /mnt -type d -name "home" -exec ls -la {} \; 2>/dev/null
       
       - name: Check SSH configuration on host
         run: |
