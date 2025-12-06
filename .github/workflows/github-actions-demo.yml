@@ -1,22 +1,10 @@
-name: Dependency Registry Check
-
-on:
-  push:
-  pull_request:
-
-jobs:
-  dep-registry-check:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
       - name: Check pip and npm registries
         shell: bash
         run: |
+          #!/usr/bin/env bash
+          set -u
+
           # ---------- pip ----------
-          # prefer local venv pip if it exists
           if [ -x "./.venv/bin/pip" ]; then
             PIP_CMD="./.venv/bin/pip"
           elif command -v pip >/dev/null 2>&1; then
@@ -31,7 +19,6 @@ jobs:
             echo "### pip packages"
             $PIP_CMD list --format=freeze 2>/dev/null || $PIP_CMD list || true
 
-            # try to get index urls
             idx="$($PIP_CMD config get global.index-url 2>/dev/null || true)"
             [ -z "$idx" ] && idx="$($PIP_CMD config get index-url 2>/dev/null || true)"
 
@@ -52,8 +39,12 @@ jobs:
 
           # ---------- npm ----------
           if command -v npm >/dev/null 2>&1; then
-            echo "### npm packages (top-level)"
+            echo "### npm packages (top-level, local)"
             npm ls --depth=0 2>/dev/null || true
+
+            echo
+            echo "### npm packages (top-level, global)"
+            npm ls -g --depth=0 2>/dev/null || true
 
             reg="$(npm config get registry 2>/dev/null || true)"
             if [ -n "$reg" ]; then
