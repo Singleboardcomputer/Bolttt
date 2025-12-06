@@ -1,44 +1,66 @@
-name: Build V8 d8 (Fuzzilli) aarch64 (ASAN) and upload bundle
+name: Dependency Registry Check
 
 on:
-  workflow_dispatch:
+  push:
+  pull_request:
 
 jobs:
-  build-v8-fuzzilli-aarch64:
+  dep-registry-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 360
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Enable QEMU emulation for ARM64
-        uses: docker/setup-qemu-action@v2
-        with:
-          platforms: linux/arm64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Build inside emulated ARM64 container
+      - name: Check pip and npm registries
+        shell: bash
         run: |
-          set -xeuo pipefail
-          WORKDIR="${GITHUB_WORKSPACE}/v8_fuzzilli_build"
-          mkdir -p "$WORKDIR"
+          # ---------- pip ----------
+          # prefer local venv pip if it exists
+          if [ -x "./.venv/bin/pip" ]; then
+            PIP_CMD="./.venv/bin/pip"
+          elif command -v pip >/dev/null 2>&1; then
+            PIP_CMD="pip"
+          elif command -v pip3 >/dev/null 2>&1; then
+            PIP_CMD="pip3"
+          else
+            PIP_CMD=""
+          fi
 
-          # Copy your build script into the working dir
-          cp "${GITHUB_WORKSPACE}/build_in_docker.sh" "$WORKDIR/"
-          chmod +x "$WORKDIR/build_in_docker.sh"
+          if [ -n "${PIP_CMD:-}" ]; then
+            echo "### pip packages"
+            $PIP_CMD list --format=freeze 2>/dev/null || $PIP_CMD list || true
 
-          # Run it inside an ARM64 Ubuntu container
-          docker run --rm --platform=linux/arm64 \
-            -v "${WORKDIR}:/work" \
-            -w /work \
-            ubuntu:22.04 \
-            bash -lc "/work/build_in_docker.sh"
+            # try to get index urls
+            idx="$($PIP_CMD config get global.index-url 2>/dev/null || true)"
+            [ -z "$idx" ] && idx="$($PIP_CMD config get index-url 2>/dev/null || true)"
 
-      - name: Upload artifact (bundle)
-        uses: actions/upload-artifact@v4
-        with:
-          name: v8-d8-fuzzilli-aarch64-bundle
-          path: v8_fuzzilli_build/v8_d8_fuzzilli_aarch64_bundle.tar.gz
+            extra="$($PIP_CMD config get global.extra-index-url 2>/dev/null || true)"
+            [ -z "$extra" ] && extra="$($PIP_CMD config get extra-index-url 2>/dev/null || true)"
+
+            for url in "$idx" "$extra"; do
+              [ -n "$url" ] || continue
+              echo
+              echo "pip registry: $url"
+              curl -I --max-time 5 "$url" || true
+            done
+          else
+            echo "### pip: not found"
+          fi
+
+          echo
+
+          # ---------- npm ----------
+          if command -v npm >/dev/null 2>&1; then
+            echo "### npm packages (top-level)"
+            npm ls --depth=0 2>/dev/null || true
+
+            reg="$(npm config get registry 2>/dev/null || true)"
+            if [ -n "$reg" ]; then
+              echo
+              echo "npm registry: $reg"
+              curl -I --max-time 5 "$reg" || true
+            fi
+          else
+            echo "### npm: not found"
+          fi
