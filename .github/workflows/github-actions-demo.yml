@@ -1,3 +1,17 @@
+name: Dependency Registry Check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  dep-registry-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Check pip and npm registries
         shell: bash
         run: |
