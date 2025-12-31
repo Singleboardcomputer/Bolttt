@@ -1,71 +1,108 @@
-name: Dependency Registry Check
+name: Pumpkin CI — build (amd64/arm64) + multi-arch image
 
 on:
   push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
 
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/pumpkin
+  RUST_TOOLCHAIN: stable
+
 jobs:
-  dep-registry-check:
-    runs-on: ubuntu-latest
+  build-and-publish:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      packages: write
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
-      - name: Check pip and npm registries
-        shell: bash
-        run: |
-          #!/usr/bin/env bash
-          set -u
+    - name: Set up QEMU (for buildx)
+      uses: tonistiigi/binfmt@v0.10
 
-          # ---------- pip ----------
-          if [ -x "./.venv/bin/pip" ]; then
-            PIP_CMD="./.venv/bin/pip"
-          elif command -v pip >/dev/null 2>&1; then
-            PIP_CMD="pip"
-          elif command -v pip3 >/dev/null 2>&1; then
-            PIP_CMD="pip3"
-          else
-            PIP_CMD=""
-          fi
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+      with:
+        install: true
 
-          if [ -n "${PIP_CMD:-}" ]; then
-            echo "### pip packages"
-            $PIP_CMD list --format=freeze 2>/dev/null || $PIP_CMD list || true
+    - name: Cache cargo registry + index
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-registry-
 
-            idx="$($PIP_CMD config get global.index-url 2>/dev/null || true)"
-            [ -z "$idx" ] && idx="$($PIP_CMD config get index-url 2>/dev/null || true)"
+    - name: Install Rust toolchain (for host builds and cache)
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: ${{ env.RUST_TOOLCHAIN }}
+        components: rustfmt, clippy
+        targets: x86_64-unknown-linux-gnu,aarch64-unknown-linux-gnu
 
-            extra="$($PIP_CMD config get global.extra-index-url 2>/dev/null || true)"
-            [ -z "$extra" ] && extra="$($PIP_CMD config get extra-index-url 2>/dev/null || true)"
+    - name: Install cross C compiler (for cross builds)
+      run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config libssl-dev
 
-            for url in "$idx" "$extra"; do
-              [ -n "$url" ] || continue
-              echo
-              echo "pip registry: $url"
-              curl -I --max-time 5 "$url" || true
-            done
-          else
-            echo "### pip: not found"
-          fi
+    # Build host amd64 binary (quick artifact)
+    - name: Build amd64 native binary (artifact)
+      run: |
+        cargo build -p pumpkin --release --target x86_64-unknown-linux-gnu
+      env:
+        CARGO_HOME: ${{ runner.temp }}/cargo
 
-          echo
+    - name: Upload amd64 artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: pumpkin-linux-amd64
+        path: target/x86_64-unknown-linux-gnu/release/pumpkin
 
-          # ---------- npm ----------
-          if command -v npm >/dev/null 2>&1; then
-            echo "### npm packages (top-level, local)"
-            npm ls --depth=0 2>/dev/null || true
+    # Cross-compile aarch64 native binary (artifact)
+    - name: Build aarch64 binary (cross)
+      run: |
+        export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+        cargo build -p pumpkin --release --target aarch64-unknown-linux-gnu
+      env:
+        CARGO_HOME: ${{ runner.temp }}/cargo
 
-            echo
-            echo "### npm packages (top-level, global)"
-            npm ls -g --depth=0 2>/dev/null || true
+    - name: Upload aarch64 artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: pumpkin-linux-arm64
+        path: target/aarch64-unknown-linux-gnu/release/pumpkin
 
-            reg="$(npm config get registry 2>/dev/null || true)"
-            if [ -n "$reg" ]; then
-              echo
-              echo "npm registry: $reg"
-              curl -I --max-time 5 "$reg" || true
-            fi
-          else
-            echo "### npm: not found"
-          fi
+    # Build & Push multi-arch image (Buildx handles per-platform build)
+    - name: Login to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Buildx
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ${{ env.IMAGE }}:latest
+          ${{ env.IMAGE }}:${{ github.ref_name }}
+
+    # Optionally: create release (on tag)
+    - name: Create release and attach artifacts (tags only)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          target/x86_64-unknown-linux-gnu/release/pumpkin
+          target/aarch64-unknown-linux-gnu/release/pumpkin
