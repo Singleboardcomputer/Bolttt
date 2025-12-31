@@ -1,8 +1,8 @@
 name: Pumpkin ARM64 Docker
-
 on:
   workflow_dispatch:
-
+  push:
+    branches: [ "main" ]
 jobs:
   build-arm64-docker:
     runs-on: ubuntu-24.04
