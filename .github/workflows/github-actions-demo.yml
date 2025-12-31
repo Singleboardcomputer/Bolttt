@@ -2,19 +2,27 @@ name: Build Pumpkin ARM64
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ "main" ]
 
 jobs:
   build-arm64:
     runs-on: ubuntu-24.04
 
     steps:
-    - name: Clone Pumpkin
+    # ------------------------------------------------------------
+    # 1. Clone Pumpkin explicitly (no checkout magic)
+    # ------------------------------------------------------------
+    - name: Clone Pumpkin repository
       run: |
         git clone https://github.com/Pumpkin-MC/Pumpkin.git
         cd Pumpkin
         git submodule update --init --recursive
 
-    - name: Install deps
+    # ------------------------------------------------------------
+    # 2. Install system deps for ARM64 cross-linking
+    # ------------------------------------------------------------
+    - name: Install cross toolchain
       run: |
         sudo apt-get update
         sudo apt-get install -y \
@@ -22,22 +30,36 @@ jobs:
           pkg-config \
           libssl-dev
 
-    - name: Install Rust
+    # ------------------------------------------------------------
+    # 3. Install Rust (minimal, deterministic)
+    # ------------------------------------------------------------
+    - name: Install Rust toolchain
       run: |
-        curl https://sh.rustup.rs -sSf | sh -s -- -y
+        curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
         source $HOME/.cargo/env
         rustup target add aarch64-unknown-linux-gnu
 
+    # ------------------------------------------------------------
+    # 4. Build Pumpkin (ARM64 ONLY, isolated target dir)
+    # ------------------------------------------------------------
     - name: Build Pumpkin ARM64
       run: |
         source $HOME/.cargo/env
         cd Pumpkin
+
         export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
         export PKG_CONFIG_ALLOW_CROSS=1
+
+        # isolate target dir so NO host objects can ever mix
+        export CARGO_TARGET_DIR=$PWD/target-arm64
+
         cargo build -p pumpkin --release --target aarch64-unknown-linux-gnu
 
-    - name: Upload binary
+    # ------------------------------------------------------------
+    # 5. Upload ARM64 binary
+    # ------------------------------------------------------------
+    - name: Upload ARM64 binary
       uses: actions/upload-artifact@v4
       with:
         name: pumpkin-linux-arm64
-        path: Pumpkin/target/aarch64-unknown-linux-gnu/release/pumpkin
+        path: Pumpkin/target-arm64/aarch64-unknown-linux-gnu/release/pumpkin
