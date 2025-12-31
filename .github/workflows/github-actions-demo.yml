@@ -2,23 +2,19 @@ name: Build Pumpkin ARM64
 
 on:
   workflow_dispatch:
-  push:
-    branches: [ "main" ]
 
 jobs:
   build-arm64:
     runs-on: ubuntu-24.04
 
     steps:
-    # 1. Clone Pumpkin explicitly
-    - name: Clone Pumpkin repo
+    - name: Clone Pumpkin
       run: |
         git clone https://github.com/Pumpkin-MC/Pumpkin.git
         cd Pumpkin
         git submodule update --init --recursive
 
-    # 2. Install system deps for cross-compile
-    - name: Install cross toolchain
+    - name: Install deps
       run: |
         sudo apt-get update
         sudo apt-get install -y \
@@ -26,15 +22,13 @@ jobs:
           pkg-config \
           libssl-dev
 
-    # 3. Install Rust + target
     - name: Install Rust
       run: |
         curl https://sh.rustup.rs -sSf | sh -s -- -y
         source $HOME/.cargo/env
         rustup target add aarch64-unknown-linux-gnu
 
-    # 4. Cross-compile Pumpkin (ARM64 ONLY)
-    - name: Build Pumpkin (aarch64)
+    - name: Build Pumpkin ARM64
       run: |
         source $HOME/.cargo/env
         cd Pumpkin
@@ -42,8 +36,7 @@ jobs:
         export PKG_CONFIG_ALLOW_CROSS=1
         cargo build -p pumpkin --release --target aarch64-unknown-linux-gnu
 
-    # 5. Upload ARM64 binary
-    - name: Upload ARM64 binary
+    - name: Upload binary
       uses: actions/upload-artifact@v4
       with:
         name: pumpkin-linux-arm64
